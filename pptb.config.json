@@ -1,0 +1,18 @@
+{
+    "invocation": {
+        "version": "1.0.0",
+        "capabilities": ["fetchxml"],
+        "prefill": {
+            "properties": {
+                "fetchXml": { "type": "string" },
+                "entityName": { "type": "string" }
+            }
+        },
+        "returnTopic": {
+            "properties": {
+                "mQuery": { "type": "string" },
+                "fetchXml": { "type": "string" }
+            }
+        }
+    }
+}
