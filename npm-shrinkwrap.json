@@ -1,12 +1,12 @@
 {
   "name": "@jybk/pptb-dataverse-m-builder",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@jybk/pptb-dataverse-m-builder",
-      "version": "1.0.3",
+      "version": "1.0.4",
       "license": "MIT",
       "dependencies": {
         "@fluentui/react-components": "^9.75.1",
