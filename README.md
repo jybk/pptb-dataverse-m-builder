@@ -6,6 +6,10 @@ A tool for [Power Platform ToolBox](https://www.powerplatformtoolbox.com), inspi
 
 ![Table mode](https://raw.githubusercontent.com/jybk/pptb-dataverse-m-builder/main/docs/table-mode.png)
 
+## Install
+
+In Power Platform ToolBox (version 1.2.7 or later), open the **Marketplace**, search for _Dataverse M Builder_ and install it. Connect to a Dataverse environment and open the tool.
+
 ## What it does
 
 **Two ways to build a query**
@@ -55,49 +59,16 @@ You can choose display names (`Primary Contact`, `Primary Contact ID`), logical 
 The tool declares the `fetchxml` capability in `pptb.config.json`, so FetchXML Studio's _Send to_ menu, and any other tool, can open it with a query:
 
 ```ts
-const result = await toolboxAPI.invocation.launchTool("<this tool's id>", {
-  fetchXml,
-});
+const result = await toolboxAPI.invocation.launchTool(
+  "@jybk/pptb-dataverse-m-builder",
+  {
+    fetchXml,
+  },
+);
 // result: { mQuery: string, fetchXml: string } when the user clicks "Send back to caller"
 ```
 
 The tool also accepts `{ entityName: "account" }` to open a table directly.
-
-## Develop, test and load locally
-
-```bash
-npm install
-npm test          # generator unit tests; every generated query is checked with Microsoft's M parser
-npm run build     # type-check and build to dist/
-```
-
-In Power Platform ToolBox: Settings → _Show Debug Menu_, then Debug → _Load Local Tool_ → choose this folder. After changes, run `npm run build` and reopen the tool tab. `npm run dev-watch` rebuilds with source maps on every save.
-
-## Installing permanently
-
-_Load Local Tool_ in the Debug menu only lasts for the current ToolBox session. To keep the tool installed:
-
-**Private marketplace (for your organisation).** No npm account needed; the tool installs from the Marketplace like any other.
-
-1. Set your name in `package.json` (`author`, `contributors`), then run `npm run pack:marketplace`. This builds the tool and writes `marketplace/pptb-dataverse-m-builder-<version>.tar.gz` and `marketplace/registry.json`.
-2. Upload both files to the same folder on an HTTPS location that ToolBox can read without signing in, such as an Azure Storage static website or an internal web server. Authenticated sources aren't supported yet.
-3. In ToolBox: **Settings → Marketplace sources → add a source**, type _private_, any display name, and the full URL of `registry.json`. Restart when asked.
-4. Open the **Marketplace**, find _Dataverse M Builder_ and install it.
-
-To release an update, raise `version` in `package.json`, run `npm run pack:marketplace` again and upload both files. Older archives can stay in the folder.
-
-**npm.** Publish the package to npm (`npm publish --access public`), then use **Debug → Install Package** with its name. This also persists, but the code is public and each machine needs the Debug menu. Submitting the npm package to the official marketplace makes it available to every ToolBox user (see Publishing).
-
-## Publishing
-
-If you publish a fork, first put your own details in `package.json`:
-
-- `author` and `contributors`
-- `configurations.repository`: your repository URL
-- `configurations.readmeUrl`: a `raw.githubusercontent.com` link to this README
-- the package `name`, if you want a scoped name
-
-Then run `npm run validate`, `npm run build`, `npm run finalize-package` and `npm publish --access public`, and submit the package through the ToolBox tool submission form.
 
 ## What this tool changes
 
@@ -110,18 +81,9 @@ Nothing in Dataverse. It reads table metadata and views, and fetches sample rows
 - Dataverse may not return a paging cookie for some queries, such as those ordered by a linked table's column. The query then falls back to simple paging, which is limited to 50,000 rows.
 - The OData style is only offered for a single table without joins or aggregates.
 
-## Project layout
+## Development
 
-```
-src/lib/fetchxml.ts   FetchXML parsing, aliasing, normalisation and the query model
-src/lib/columns.ts    output columns, modes, naming and types
-src/lib/mcode.ts      M generation: FetchXML, OData, choice tables, parameter
-src/lib/metadata.ts   metadata mapping
-src/lib/dataverse.ts  calls to the ToolBox Dataverse API
-src/lib/preview.ts    applies the M shaping to preview rows
-src/components/       React + Fluent UI components
-tests/                Vitest tests
-```
+To build or test the tool, load it locally, host it in a private marketplace or publish a fork, see [CONTRIBUTING.md](https://github.com/jybk/pptb-dataverse-m-builder/blob/main/CONTRIBUTING.md).
 
 ## Credits
 

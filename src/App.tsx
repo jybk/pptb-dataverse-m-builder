@@ -33,6 +33,7 @@ import { copyText, hasToolbox, notify, saveText, useBuilderSettings, useConnecti
 import { resolveOutputColumns } from "./lib/columns";
 import { errorMessage, loadAttributes, loadOptions, loadTables, loadViews, runFetchPreview, runODataPreview, type ViewInfo } from "./lib/dataverse";
 import { buildQueryModel, buildTableFetchXml, fetchEntities, FetchXmlError, linesToXml, parseFetchXml, previewFetchXml, serializeLines } from "./lib/fetchxml";
+import { callerExpectsReply, otherTools } from "./lib/invocation";
 import { choiceColumns, generateChoiceQuery, generateFetchXmlQuery, generateODataQuery, generateParameterQuery, odataSelect, type ChoiceQuery } from "./lib/mcode";
 import type { ChoiceOption } from "./lib/metadata";
 import { buildPreview } from "./lib/preview";
@@ -191,12 +192,9 @@ export default function App() {
                 } else if (ctx && typeof ctx.entityName === "string") {
                     setSelectedTable(ctx.entityName);
                 }
-                const toolCtx = await window.toolboxAPI.getToolContext?.();
-                // Launched by another tool: offer to send the M back, unless ToolBox says the caller doesn't want a reply
-                const meta = (ctx?.__pptb ?? toolCtx?.invocationContext) as { mode?: string; expectsResponse?: boolean } | undefined;
-                setCanReturn(!!ctx && meta?.mode !== "one-way" && meta?.expectsResponse !== false);
-                const tools = (await window.toolboxAPI.invocation?.findToolsByCapability?.("fetchxml")) as Array<{ id: string; name: string }> | undefined;
-                setSendTargets((tools ?? []).filter((t) => t && t.id && t.id !== toolCtx?.toolId).map((t) => ({ id: t.id, name: t.name ?? t.id })));
+                // Launched by another tool: offer to send the M back, unless the caller doesn't want a reply
+                setCanReturn(callerExpectsReply(ctx));
+                setSendTargets(otherTools(await window.toolboxAPI.invocation?.findToolsByCapability?.("fetchxml")));
             } catch (err) {
                 console.warn("Inter-tool setup failed", err);
             }
