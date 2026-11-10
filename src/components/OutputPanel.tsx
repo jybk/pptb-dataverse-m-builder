@@ -26,6 +26,7 @@ import { ArrowReply16Regular, Copy16Regular, Edit16Regular, Play16Regular, Save1
 import { useState, type ReactNode } from "react";
 import type { ChoiceQuery } from "../lib/mcode";
 import type { PreviewResult } from "../lib/preview";
+import { DAYLIGHT_SAVING_LABELS, offsetLabel } from "../lib/timezone";
 import type { BuilderSettings, QueryModel } from "../lib/types";
 import { CodeView } from "./CodeView";
 
@@ -71,18 +72,16 @@ export interface PreviewState {
 /** UTC−12:00 … UTC+14:00 in half hours, plus the quarter-hour zones (Nepal, Eucla, Chatham). */
 const OFFSETS = [...Array.from({ length: 53 }, (_, i) => -720 + i * 30), 345, 525, 765].sort((a, b) => a - b);
 
-function offsetLabel(minutes: number): string {
-    const sign = minutes < 0 ? "−" : "+";
-    const abs = Math.abs(minutes);
-    return `UTC${sign}${String(Math.floor(abs / 60)).padStart(2, "0")}:${String(abs % 60).padStart(2, "0")}`;
-}
-
 export function OutputPanel(props: {
     tab: OutputTab;
     onTab: (tab: OutputTab) => void;
     mode: "table" | "fetchxml";
     model: QueryModel | null;
     modelError: string | null;
+    /** The query's own warnings plus the ones that depend on the chosen output. */
+    warnings: string[];
+    /** True when any column is converted to local time, also when only one column is set to it. */
+    usesLocalTime: boolean;
     columnCount: number;
     mCode: string | null;
     settings: BuilderSettings;
@@ -191,31 +190,47 @@ export function OutputPanel(props: {
                                 onChange={(_, d) => props.updateSettings({ dateMode: d.value as BuilderSettings["dateMode"] })}
                             >
                                 <option value="utc">UTC</option>
-                                <option value="offset">Fixed offset</option>
+                                <option value="offset">Local time</option>
                                 <option value="formatted">Formatted text</option>
                             </Select>
-                            {settings.dateMode === "offset" && (
-                                <Select
-                                    size="small"
-                                    aria-label="UTC offset"
-                                    value={String(settings.utcOffsetMinutes)}
-                                    onChange={(_, d) => props.updateSettings({ utcOffsetMinutes: Number(d.value) })}
-                                >
-                                    {OFFSETS.map((m) => (
-                                        <option key={m} value={m}>
-                                            {offsetLabel(m)}
-                                        </option>
-                                    ))}
-                                </Select>
+                            {(settings.dateMode === "offset" || props.usesLocalTime) && (
+                                <>
+                                    <Tooltip content="Offset from UTC in winter (standard time)" relationship="description">
+                                        <Select
+                                            size="small"
+                                            aria-label="Standard UTC offset"
+                                            value={String(settings.utcOffsetMinutes)}
+                                            onChange={(_, d) => props.updateSettings({ utcOffsetMinutes: Number(d.value) })}
+                                        >
+                                            {OFFSETS.map((m) => (
+                                                <option key={m} value={m}>
+                                                    {offsetLabel(m)}
+                                                </option>
+                                            ))}
+                                        </Select>
+                                    </Tooltip>
+                                    <Select
+                                        size="small"
+                                        aria-label="Daylight saving"
+                                        value={settings.daylightSaving}
+                                        onChange={(_, d) => props.updateSettings({ daylightSaving: d.value as BuilderSettings["daylightSaving"] })}
+                                    >
+                                        {(Object.keys(DAYLIGHT_SAVING_LABELS) as Array<BuilderSettings["daylightSaving"]>).map((rule) => (
+                                            <option key={rule} value={rule}>
+                                                {DAYLIGHT_SAVING_LABELS[rule]}
+                                            </option>
+                                        ))}
+                                    </Select>
+                                </>
                             )}
                         </div>
                     </div>
-                    {model.warnings.length > 0 && (
+                    {props.warnings.length > 0 && (
                         <MessageBar intent="warning" layout="multiline">
                             <MessageBarBody>
                                 <MessageBarTitle>Check before you use this query</MessageBarTitle>
                                 <ul className={styles.warnings}>
-                                    {model.warnings.map((w, i) => (
+                                    {props.warnings.map((w, i) => (
                                         <li key={i}>{w}</li>
                                     ))}
                                 </ul>

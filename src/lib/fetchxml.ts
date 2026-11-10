@@ -125,7 +125,26 @@ function stripDesignerAttributes(fetch: Element) {
 function renameAliasReferences(doc: Document, from: string, to: string) {
     for (const el of Array.from(doc.getElementsByTagName("*"))) {
         if (el.getAttribute("entityname") === from) el.setAttribute("entityname", to);
+        // Column comparisons name the other column as "alias.column"
+        const valueOf = el.getAttribute("valueof");
+        if (valueOf?.startsWith(`${from}.`)) el.setAttribute("valueof", to + valueOf.slice(from.length));
     }
+}
+
+/** Paging pitfalls Microsoft documents for FetchXML; they only matter when the query is paged. */
+function pagingWarnings(entityEl: Element, isDistinct: boolean): string[] {
+    const warnings: string[] = [];
+    const orders = Array.from(entityEl.getElementsByTagName("order"));
+    if (isDistinct && orders.length === 0) {
+        warnings.push("The query is distinct but has no <order>. Dataverse needs one to page distinct results consistently: add an <order> on the columns you return.");
+    }
+    const onLinkedTable = orders.some((o) => o.getAttribute("entityname") || o.parentElement?.tagName === "link-entity");
+    if (onLinkedTable) {
+        warnings.push(
+            "The query sorts on a linked table's column. Dataverse may then page without a paging cookie, which is slower and stops at 50,000 rows. Remove that <order> if the result can be larger; row order rarely matters in Power BI.",
+        );
+    }
+    return warnings;
 }
 
 /** Put <attribute> elements first in each entity / link-entity; the order of everything else is kept. */
@@ -189,6 +208,7 @@ export function buildQueryModel(input: ModelInput): QueryModel {
         }
         fetch.removeAttribute("count");
     }
+    if (!singleRequest) warnings.push(...pagingWarnings(entityEl, isDistinct));
     if (top) warnings.push(`The query has top="${top}", so it returns at most ${top} rows and isn't paged.`);
     if (isAggregate) warnings.push("Aggregate queries are sent as a single request (Dataverse limits aggregates to 50,000 source rows).");
 

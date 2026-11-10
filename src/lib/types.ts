@@ -51,6 +51,8 @@ export interface AttributeInfo {
 export type LookupMode = "both" | "name" | "id" | "all";
 export type ChoiceMode = "label" | "value" | "both";
 export type DateMode = "utc" | "offset" | "formatted";
+/** Daylight saving rule applied on top of the standard UTC offset when dates are shown in local time. */
+export type DaylightSaving = "none" | "eu" | "us";
 export type NamingMode = "display" | "logical" | "schema";
 export type QueryStyle = "fetchxml" | "odata";
 
@@ -70,8 +72,9 @@ export interface BuilderSettings {
     choiceMode: ChoiceMode;
     booleanMode: ChoiceMode;
     dateMode: DateMode;
-    /** Fixed offset from UTC in minutes, used when dateMode is "offset". */
+    /** Standard-time offset from UTC in minutes, used when dateMode is "offset" (local time). */
     utcOffsetMinutes: number;
+    daylightSaving: DaylightSaving;
     choiceTables: "live" | "static";
 }
 
@@ -90,6 +93,7 @@ export const DEFAULT_SETTINGS: BuilderSettings = {
     booleanMode: "value",
     dateMode: "utc",
     utcOffsetMinutes: 60,
+    daylightSaving: "none",
     choiceTables: "live",
 };
 
@@ -122,7 +126,8 @@ export interface ColumnSpec {
 }
 
 export type OutputRole = "value" | "label" | "id" | "name" | "table";
-export type Conversion = "utc" | "offset" | "date" | "wallclock";
+/** "localdate" is a user-local date-only column converted to local time and cut down to its date. */
+export type Conversion = "utc" | "offset" | "date" | "wallclock" | "localdate";
 
 /** One column of the final Power Query table. */
 export interface OutputColumn {

@@ -466,3 +466,35 @@ describe("preview", () => {
         expect(preview.unusedKeys).toEqual(["extra"]);
     });
 });
+
+describe("review fixes", () => {
+    const build = (xml: string) => {
+        const { tables, attributes } = fixture();
+        return buildQueryModel({ doc: parseFetchXml(xml), tables, attributes, pageSize: 5000, includeRecordUrl: false });
+    };
+
+    it("keeps column comparisons pointing at a linked table whose generated alias is replaced", () => {
+        const model = build(`<fetch><entity name="account"><attribute name="name" />
+            <filter><condition attribute="name" operator="ne" valueof="a_0123456789abcdef0123456789abcdef.fullname" />
+                    <condition entityname="a_0123456789abcdef0123456789abcdef" attribute="emailaddress1" operator="not-null" /></filter>
+            <link-entity name="contact" from="contactid" to="primarycontactid" alias="a_0123456789abcdef0123456789abcdef"><attribute name="fullname" /></link-entity>
+        </entity></fetch>`);
+        expect(model.fetchXml).toContain('valueof="contact.fullname"');
+        expect(model.fetchXml).toContain('entityname="contact"');
+        expect(model.fetchXml).not.toContain("a_0123456789abcdef");
+    });
+
+    it("warns about the paging limits Microsoft documents", () => {
+        const sortedOnLink = build(`<fetch><entity name="account"><attribute name="name" />
+            <link-entity name="contact" from="contactid" to="primarycontactid" alias="c"><attribute name="fullname" /><order attribute="fullname" /></link-entity></entity></fetch>`);
+        expect(sortedOnLink.warnings.join(" ")).toContain("stops at 50,000 rows");
+
+        const distinct = build(`<fetch distinct="true"><entity name="account"><attribute name="name" /></entity></fetch>`);
+        expect(distinct.warnings.join(" ")).toContain("distinct but has no <order>");
+
+        // Fine: sorted on the main table; and a top query isn't paged at all
+        expect(build(`<fetch distinct="true"><entity name="account"><attribute name="name" /><order attribute="name" /></entity></fetch>`).warnings).toEqual([]);
+        const top = build(`<fetch top="10" distinct="true"><entity name="account"><attribute name="name" /></entity></fetch>`);
+        expect(top.warnings.join(" ")).not.toContain("<order>");
+    });
+});

@@ -55,8 +55,11 @@ export interface ViewInfo {
 
 export async function loadViews(entity: string): Promise<ViewInfo[]> {
     const filter = encodeURIComponent(`returnedtypecode eq '${entity}' and querytype eq 0`);
+    // System views are the point of the menu, so a failure there is reported; personal views are a bonus
     const [system, personal] = await Promise.all([
-        optional(`savedqueries?$select=savedqueryid,name,fetchxml,isdefault&$filter=${filter}&$orderby=name`),
+        api()
+            .queryData(`savedqueries?$select=savedqueryid,name,fetchxml,isdefault&$filter=${filter}&$orderby=name`)
+            .then((res) => (res.value ?? []) as Raw[]),
         optional(`userqueries?$select=userqueryid,name,fetchxml&$filter=${filter}&$orderby=name`),
     ]);
     return [

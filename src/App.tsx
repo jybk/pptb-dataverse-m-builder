@@ -30,11 +30,12 @@ import { OutputPanel, type OutputTab, type PreviewState } from "./components/Out
 import { SettingsDialog } from "./components/SettingsDialog";
 import { TablePicker } from "./components/TablePicker";
 import { copyText, hasToolbox, notify, saveText, useBuilderSettings, useConnection, useTheme, useToolboxEvents } from "./hooks/useToolbox";
-import { resolveOutputColumns } from "./lib/columns";
+import { outputWarnings, resolveOutputColumns } from "./lib/columns";
 import { errorMessage, loadAttributes, loadOptions, loadTables, loadViews, runFetchPreview, runODataPreview, type ViewInfo } from "./lib/dataverse";
 import { buildQueryModel, buildTableFetchXml, fetchEntities, FetchXmlError, linesToXml, parseFetchXml, previewFetchXml, serializeLines } from "./lib/fetchxml";
 import { callerExpectsReply, otherTools } from "./lib/invocation";
-import { choiceColumns, generateChoiceQuery, generateFetchXmlQuery, generateODataQuery, generateParameterQuery, odataSelect, type ChoiceQuery } from "./lib/mcode";
+import { EMPTY_SESSION, parseSession, serializeSession, sessionKey } from "./lib/session";
+import { choiceColumns, generateChoiceQuery, generateFetchXmlQuery, generateODataQuery, generateParameterQuery, normaliseUrl, odataSelect, type ChoiceQuery } from "./lib/mcode";
 import type { ChoiceOption } from "./lib/metadata";
 import { buildPreview } from "./lib/preview";
 import type { AttributeInfo, ColumnOverride, ColumnOverrides, OutputColumn, QueryModel, TableInfo } from "./lib/types";
@@ -101,7 +102,9 @@ export default function App() {
     const styles = useStyles();
     const { theme, refreshTheme } = useTheme();
     const { connection, loading: connectionLoading, refresh: refreshConnection } = useConnection();
-    const { settings, update, reset } = useBuilderSettings();
+    // The environment's address identifies what is remembered for it (session, record-link app)
+    const envKey = connection?.url ? normaliseUrl(connection.url).toLowerCase() : null;
+    const { settings, update, reset } = useBuilderSettings(envKey);
 
     const [tables, setTables] = useState<TableInfo[] | null>(null);
     const [tablesLoading, setTablesLoading] = useState(false);
@@ -126,6 +129,11 @@ export default function App() {
     const optionGroupsLoaded = useRef(new Set<string>());
     const [sendTargets, setSendTargets] = useState<Array<{ id: string; name: string }>>([]);
     const [canReturn, setCanReturn] = useState(false);
+    /** Whether another tool opened this one with a query: unknown until ToolBox answers. */
+    const [launch, setLaunch] = useState<"pending" | "prefilled" | "normal">(hasToolbox() ? "pending" : "normal");
+    /** The environment whose session is loaded; saving only starts once it is. */
+    const [sessionFor, setSessionFor] = useState<string | null>(null);
+    const lastEnv = useRef<string | null>(null);
     const [leftPercent, setLeftPercent] = useState(58);
     const mainRef = useRef<HTMLDivElement>(null);
 
@@ -186,20 +194,73 @@ export default function App() {
         (async () => {
             try {
                 const ctx = await window.toolboxAPI.invocation?.getLaunchContext?.();
+                let prefilled = true;
                 if (ctx && typeof ctx.fetchXml === "string" && ctx.fetchXml.trim()) {
                     setFetchText(formatFetchXml(ctx.fetchXml));
                     setMode("fetchxml");
-                } else if (ctx && typeof ctx.entityName === "string") {
+                } else if (ctx && typeof ctx.entityName === "string" && ctx.entityName) {
                     setSelectedTable(ctx.entityName);
+                    setMode("table");
+                } else {
+                    prefilled = false;
                 }
+                setLaunch(prefilled ? "prefilled" : "normal");
                 // Launched by another tool: offer to send the M back, unless the caller doesn't want a reply
                 setCanReturn(callerExpectsReply(ctx));
                 setSendTargets(otherTools(await window.toolboxAPI.invocation?.findToolsByCapability?.("fetchxml")));
             } catch (err) {
                 console.warn("Inter-tool setup failed", err);
+                setLaunch((l) => (l === "pending" ? "normal" : l));
             }
         })();
     }, []);
+
+    // ---------- remember the work per environment ----------
+    // A query handed over by another tool is a one-off: it is neither replaced by the saved session nor saved over it.
+    useEffect(() => {
+        if (!envKey || launch !== "normal" || !hasToolbox()) return;
+        let cancelled = false;
+        setSessionFor(null);
+        window.toolboxAPI.settings
+            .get(sessionKey(envKey))
+            .then((raw: unknown) => {
+                if (cancelled) return;
+                // Switching to an environment with nothing saved starts clean rather than carrying the other environment's query over
+                const saved = parseSession(raw) ?? (lastEnv.current && lastEnv.current !== envKey ? EMPTY_SESSION : null);
+                if (saved) {
+                    setMode(saved.mode);
+                    setSelectedTable(saved.selectedTable);
+                    setSelection(saved.selection);
+                    setFetchText(saved.fetchText);
+                    setOverridesByCtx(saved.overridesByCtx);
+                    setPreview({ loading: false, error: null, result: null, ranAt: null });
+                }
+                lastEnv.current = envKey;
+                setSessionFor(envKey);
+            })
+            .catch((err: unknown) => {
+                console.warn("Couldn't read the saved session", err);
+                if (!cancelled) setSessionFor(envKey);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [envKey, launch]);
+
+    useEffect(() => {
+        if (!envKey || sessionFor !== envKey || !hasToolbox()) return;
+        const t = window.setTimeout(() => {
+            window.toolboxAPI.settings
+                .set(sessionKey(envKey), serializeSession({ mode, selectedTable, selection, fetchText, overridesByCtx }))
+                .catch((err: unknown) => console.warn("Couldn't save the session", err));
+        }, 800);
+        return () => window.clearTimeout(t);
+    }, [envKey, sessionFor, mode, selectedTable, selection, fetchText, overridesByCtx]);
+
+    // A remembered or prefilled table that this environment doesn't have (any more) would leave the column list loading forever
+    useEffect(() => {
+        if (tables && selectedTable && !tablesByName.has(selectedTable)) setSelectedTable(null);
+    }, [tables, selectedTable, tablesByName]);
 
     // ---------- table mode ----------
     const selectTable = useCallback((name: string) => {
@@ -279,6 +340,8 @@ export default function App() {
         for (const o of outputs) m.set(o.colId, [...(m.get(o.colId) ?? []), o]);
         return m;
     }, [outputs]);
+
+    const warnings = useMemo(() => (model ? [...model.warnings, ...outputWarnings(model.columns, outputs)] : []), [model, outputs]);
 
     const useOData = settings.queryStyle === "odata" && !!model?.odata;
     const mCode = useMemo(() => {
@@ -461,7 +524,9 @@ export default function App() {
     );
 
     const openViews = useCallback(() => {
-        if (!selectedTable || views[selectedTable]) return;
+        const current = selectedTable ? views[selectedTable] : undefined;
+        // Opening the menu again after a failure tries once more
+        if (!selectedTable || (current && current !== "error")) return;
         setViews((v) => ({ ...v, [selectedTable]: "loading" }));
         loadViews(selectedTable)
             .then((list) => setViews((v) => ({ ...v, [selectedTable]: list })))
@@ -675,6 +740,8 @@ export default function App() {
                         mode={mode}
                         model={model && (mode === "fetchxml" || (selection[selectedTable ?? ""]?.length ?? 0) > 0) ? model : null}
                         modelError={modelError}
+                        warnings={warnings}
+                        usesLocalTime={outputs.some((o) => o.conversion === "offset" || o.conversion === "localdate")}
                         columnCount={outputs.length + (model?.recordUrlKey ? 1 : 0)}
                         mCode={mCode}
                         settings={settings}
@@ -728,7 +795,7 @@ export default function App() {
                 </header>
                 {body}
             </div>
-            <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} settings={settings} update={update} reset={reset} connected={!!connection} />
+            <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} settings={settings} update={update} reset={reset} connected={!!connection} environment={envKey} />
         </FluentProvider>
     );
 }

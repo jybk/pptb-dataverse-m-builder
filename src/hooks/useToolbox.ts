@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { detectTimeZone } from "../lib/timezone";
 import { DEFAULT_SETTINGS, type BuilderSettings } from "../lib/types";
 
 type Connection = ToolBoxAPI.Connection;
@@ -73,9 +74,39 @@ export function useTheme() {
 
 const SETTINGS_KEY = "builderSettings";
 
-/** Builder settings, persisted with the ToolBox settings API. */
-export function useBuilderSettings() {
-    const [settings, setSettings] = useState<BuilderSettings>(DEFAULT_SETTINGS);
+/**
+ * Saved settings on top of the defaults. Settings saved before daylight saving existed keep their
+ * fixed offset if local time was in use; everyone else starts from this computer's time zone.
+ */
+export function withTimeZone<T extends Partial<BuilderSettings>>(saved: T, detect: () => Pick<BuilderSettings, "utcOffsetMinutes" | "daylightSaving"> = detectTimeZone): BuilderSettings & T {
+    if (saved.daylightSaving !== undefined || saved.dateMode === "offset") return { ...DEFAULT_SETTINGS, ...saved };
+    let zone = {};
+    try {
+        zone = detect();
+    } catch {
+        /* keep the defaults */
+    }
+    return { ...DEFAULT_SETTINGS, ...saved, ...zone };
+}
+
+/** What is stored: the settings, plus the model-driven app chosen for record links in each environment. */
+type StoredSettings = BuilderSettings & { appIdByEnv?: Record<string, string> };
+
+/**
+ * The app id that applies to an environment. An app id belongs to one environment, so it is kept per
+ * environment; a value saved before that (one global id) is treated as belonging to the first
+ * environment that asks.
+ */
+export function appIdFor(stored: StoredSettings, environment: string | null): string {
+    if (!environment) return "";
+    const byEnv = stored.appIdByEnv;
+    if (byEnv) return byEnv[environment] ?? "";
+    return stored.appId ?? "";
+}
+
+/** Builder settings, persisted with the ToolBox settings API. `environment` is the connected environment's URL. */
+export function useBuilderSettings(environment: string | null) {
+    const [stored, setSettings] = useState<StoredSettings>(DEFAULT_SETTINGS);
     const loaded = useRef(false);
 
     useEffect(() => {
@@ -83,7 +114,7 @@ export function useBuilderSettings() {
             if (hasToolbox()) {
                 try {
                     const saved = await window.toolboxAPI.settings.get(SETTINGS_KEY);
-                    if (saved && typeof saved === "object") setSettings({ ...DEFAULT_SETTINGS, ...(saved as Partial<BuilderSettings>) });
+                    setSettings(withTimeZone(saved && typeof saved === "object" ? (saved as Partial<StoredSettings>) : {}));
                 } catch (err) {
                     console.warn("Couldn't read saved settings", err);
                 }
@@ -95,13 +126,38 @@ export function useBuilderSettings() {
     useEffect(() => {
         if (!loaded.current || !hasToolbox()) return;
         const t = window.setTimeout(() => {
-            window.toolboxAPI.settings.set(SETTINGS_KEY, settings).catch((err: unknown) => console.warn("Couldn't save settings", err));
+            window.toolboxAPI.settings.set(SETTINGS_KEY, stored).catch((err: unknown) => console.warn("Couldn't save settings", err));
         }, 400);
         return () => window.clearTimeout(t);
-    }, [settings]);
+    }, [stored]);
 
-    const update = useCallback((patch: Partial<BuilderSettings>) => setSettings((s) => ({ ...s, ...patch })), []);
-    return { settings, update, reset: () => setSettings(DEFAULT_SETTINGS) };
+    // Pin a pre-existing global app id to the first environment seen, so it stops following the user to other environments
+    useEffect(() => {
+        if (!loaded.current || !environment) return;
+        setSettings((s) => (s.appIdByEnv ? s : { ...s, appId: "", appIdByEnv: s.appId ? { [environment]: s.appId } : {} }));
+    }, [environment, stored]);
+
+    const settings = useMemo<BuilderSettings>(() => {
+        const { appIdByEnv: _byEnv, ...rest } = stored;
+        return { ...rest, appId: appIdFor(stored, environment) };
+    }, [stored, environment]);
+
+    const update = useCallback(
+        (patch: Partial<BuilderSettings>) =>
+            setSettings((s) => {
+                if (patch.appId === undefined) return { ...s, ...patch };
+                const { appId, ...rest } = patch;
+                const byEnv = { ...(s.appIdByEnv ?? {}) };
+                if (environment) {
+                    if (appId) byEnv[environment] = appId;
+                    else delete byEnv[environment];
+                }
+                return { ...s, ...rest, appId: "", appIdByEnv: byEnv };
+            }),
+        [environment],
+    );
+    // Reset keeps the per-environment app choices out: they are settings too
+    return { settings, update, reset: () => setSettings(withTimeZone({})) };
 }
 
 export async function notify(title: string, body: string, type: "info" | "success" | "warning" | "error" = "info") {

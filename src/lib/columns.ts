@@ -21,7 +21,7 @@ export const CHOICE_MODES: ModeOption[] = [
 
 export const DATE_MODES: ModeOption[] = [
     { value: "utc", label: "UTC" },
-    { value: "offset", label: "Fixed offset" },
+    { value: "offset", label: "Local time" },
     { value: "formatted", label: "Formatted text" },
 ];
 
@@ -96,7 +96,23 @@ function dateConversion(spec: ColumnSpec, mode: DateMode): Conversion | "formatt
     if (a.dateBehavior === "DateOnly") return "date";
     if (a.dateBehavior === "TimeZoneIndependent") return a.dateFormat === "DateOnly" ? "date" : "wallclock";
     if (mode === "formatted") return "formatted";
-    return mode === "offset" ? "offset" : "utc";
+    if (mode === "offset") return isLocalDateOnly(spec) ? "localdate" : "offset";
+    return "utc";
+}
+
+/** A "Date only" format column with user-local behaviour: stored as midnight in the user's time zone, converted to UTC. */
+function isLocalDateOnly(spec: ColumnSpec): boolean {
+    const a = spec.attribute;
+    return a.kind === "datetime" && a.dateFormat === "DateOnly" && a.dateBehavior !== "DateOnly" && a.dateBehavior !== "TimeZoneIndependent" && !spec.aggregate && !spec.dategrouping;
+}
+
+/** Things worth knowing about the chosen output that don't depend on the query itself. */
+export function outputWarnings(specs: ColumnSpec[], outputs: OutputColumn[]): string[] {
+    const byId = new Map(specs.map((s) => [s.id, s]));
+    const shifted = outputs.filter((o) => o.conversion === "utc" && byId.has(o.colId) && isLocalDateOnly(byId.get(o.colId)!)).map((o) => `"${o.name}"`);
+    if (shifted.length === 0) return [];
+    const subject = shifted.length === 1 ? `${shifted[0]} is a date-only column` : `${shifted.join(", ")} are date-only columns`;
+    return [`${subject} stored in each user's local time. In UTC the date can be a day off (for a user at UTC+1, midnight is 23:00 UTC the day before). Set Date/time to Local time to get the date users see.`];
 }
 
 export function recordUrlColumnName(naming: NamingMode): string {
@@ -132,7 +148,7 @@ export function resolveOutputColumns(specs: ColumnSpec[], settings: BuilderSetti
         } else if (kind === "datetime") {
             const conv = dateConversion(spec, (mode as DateMode) ?? "utc");
             if (conv === "formatted") push(spec.key + FORMATTED, base, "label", "type text");
-            else push(spec.key, base, "value", conv === "date" ? "type date" : "type datetime", conv);
+            else push(spec.key, base, "value", conv === "date" || conv === "localdate" ? "type date" : "type datetime", conv);
         } else {
             push(spec.key, base, "value", valueType(spec));
         }

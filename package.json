@@ -52,6 +52,7 @@
     "typecheck": "tsc --noEmit",
     "finalize-package": "npm shrinkwrap",
     "validate": "pptb-validate",
+    "prepublishOnly": "npm run build && npm test",
     "version-stable": "npm version patch --no-git-tag-version",
     "publish-package": "npm run build && npm run version-stable && npm publish --access public"
   },

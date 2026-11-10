@@ -11,7 +11,7 @@ npm run build     # type-check and build to dist/
 npm run validate  # the same package checks the ToolBox registry runs
 ```
 
-In Power Platform ToolBox: Settings → _Show Debug Menu_, then Debug → _Load Local Tool_ → choose this folder. After changes, run `npm run build` and reopen the tool tab. `npm run dev-watch` rebuilds with source maps on every save. _Load Local Tool_ only lasts for the current ToolBox session.
+In Power Platform ToolBox: Settings → _Show Debug Menu_, then Debug → _Load Local Tool_ → choose this folder. After changes, run `npm run build` and reopen the tool tab. `npm run dev-watch` rebuilds with source maps on every save. Every push and pull request runs the tests, the build and the registry validation in GitHub Actions (`.github/workflows/ci.yml`). _Load Local Tool_ only lasts for the current ToolBox session.
 
 ## Project layout
 
@@ -23,6 +23,8 @@ src/lib/metadata.ts    metadata mapping
 src/lib/dataverse.ts   calls to the ToolBox Dataverse API
 src/lib/preview.ts     applies the M shaping to preview rows
 src/lib/invocation.ts  helpers for launching and being launched by other tools
+src/lib/timezone.ts    daylight saving rules (shared by the M generator and the preview) and time zone detection
+src/lib/session.ts     what is remembered per environment
 src/components/        React + Fluent UI components
 tests/                 Vitest tests
 ```

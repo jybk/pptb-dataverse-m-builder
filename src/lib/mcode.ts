@@ -1,6 +1,7 @@
 import { FORMATTED, LOOKUP_TABLE, needsAnnotation, recordUrlColumnName } from "./columns";
 import type { ChoiceOption } from "./metadata";
 import { optionMetadataType } from "./metadata";
+import { offsetLabel } from "./timezone";
 import type { AttributeKind, BuilderSettings, ColumnSpec, OutputColumn, QueryModel, TableInfo } from "./types";
 
 const PAGING_COOKIE = "Microsoft.Dynamics.CRM.fetchxmlpagingcookie";
@@ -132,23 +133,73 @@ function offsetParts(minutes: number): [number, number] {
     return [h, m === 0 ? 0 : m];
 }
 
+function duration(minutes: number): string {
+    const [h, m] = offsetParts(minutes);
+    return `#duration(0, ${h}, ${m}, 0)`;
+}
+
+/**
+ * The ToLocalDateTime function: UTC text from Dataverse to a datetime on the local clock.
+ * The daylight saving rules are the ones in timezone.ts, which the preview uses.
+ */
+function localTimeSteps(settings: BuilderSettings): string[] {
+    const standard = settings.utcOffsetMinutes;
+    const [h, m] = offsetParts(standard);
+    if (settings.daylightSaving === "eu") {
+        return [
+            `${I1}// Local time: ${offsetLabel(standard)}, and ${offsetLabel(standard + 60)} during European summer time`,
+            `${I1}// (last Sunday of March to last Sunday of October; the clocks change at 01:00 UTC)`,
+            `${I1}LastSundayOf = (year as number, month as number) as datetime =>`,
+            `${I2}let LastDay = Date.EndOfMonth(#date(year, month, 1))`,
+            `${I2}in DateTime.From(Date.AddDays(LastDay, -Date.DayOfWeek(LastDay, Day.Sunday))) + #duration(0, 1, 0, 0),`,
+            `${I1}ToLocalDateTime = (value) =>`,
+            `${I2}if value = null then null`,
+            `${I2}else`,
+            `${I3}let`,
+            `${I4}Utc = DateTimeZone.RemoveZone(DateTimeZone.FromText(value)),`,
+            `${I4}IsSummerTime = Utc >= LastSundayOf(Date.Year(Utc), 3) and Utc < LastSundayOf(Date.Year(Utc), 10)`,
+            `${I3}in`,
+            `${I4}Utc + (if IsSummerTime then ${duration(standard + 60)} else ${duration(standard)}),`,
+        ];
+    }
+    if (settings.daylightSaving === "us") {
+        return [
+            `${I1}// Local time: ${offsetLabel(standard)}, and ${offsetLabel(standard + 60)} during daylight saving time (United States and Canada:`,
+            `${I1}// second Sunday of March to first Sunday of November; the clocks change at 02:00 local time)`,
+            `${I1}NthSundayOf = (year as number, month as number, n as number) as datetime =>`,
+            `${I2}let First = #date(year, month, 1)`,
+            `${I2}in DateTime.From(Date.AddDays(First, Number.Mod(7 - Date.DayOfWeek(First, Day.Sunday), 7) + 7 * (n - 1))),`,
+            `${I1}ToLocalDateTime = (value) =>`,
+            `${I2}if value = null then null`,
+            `${I2}else`,
+            `${I3}let`,
+            `${I4}Standard = DateTimeZone.RemoveZone(DateTimeZone.FromText(value)) + ${duration(standard)},`,
+            `${I4}Year = Date.Year(Standard),`,
+            `${I4}IsDaylightSaving = Standard >= NthSundayOf(Year, 3, 2) + #duration(0, 2, 0, 0) and Standard < NthSundayOf(Year, 11, 1) + #duration(0, 1, 0, 0)`,
+            `${I3}in`,
+            `${I4}if IsDaylightSaving then Standard + #duration(0, 1, 0, 0) else Standard,`,
+        ];
+    }
+    return [
+        `${I1}// Local time: ${offsetLabel(standard)} all year. Choose a daylight saving rule in the builder if the clocks change where you are.`,
+        `${I1}ToLocalDateTime = (value) => if value = null then null else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(value), ${h}, ${m})),`,
+    ];
+}
+
 /**
  * Steps shared by both query styles: from the list of JSON records to the final typed table.
  * All column decisions live in one `Columns` list (response key, name, type, optional conversion),
  * so a column is added, removed or renamed by editing one line.
  */
 function shapeSteps(model: QueryModel, outputs: OutputColumn[], settings: BuilderSettings): { steps: string[]; last: string } {
-    const steps: string[] = ["", `${I1}// Columns: response key, column name, type and (for dates) conversion. Edit a line to rename or retype a column.`];
+    const steps: string[] = [""];
     const conversions = new Set(outputs.map((o) => o.conversion).filter(Boolean));
     if (conversions.has("utc") || conversions.has("wallclock")) {
         steps.push(`${I1}ToDateTime = (value) => if value = null then null else DateTimeZone.RemoveZone(DateTimeZone.FromText(value)),`);
     }
-    if (conversions.has("offset")) {
-        const [h, m] = offsetParts(settings.utcOffsetMinutes);
-        steps.push(
-            `${I1}// Fixed UTC offset: adjust it, or replace it with a time zone table, if you need daylight saving`,
-            `${I1}ToLocalDateTime = (value) => if value = null then null else DateTimeZone.RemoveZone(DateTimeZone.SwitchZone(DateTimeZone.FromText(value), ${h}, ${m})),`,
-        );
+    if (conversions.has("offset") || conversions.has("localdate")) steps.push(...localTimeSteps(settings));
+    if (conversions.has("localdate")) {
+        steps.push(`${I1}// Date-only columns stored in local time: convert to local time first, then keep the date`, `${I1}ToLocalDate = (value) => Date.From(ToLocalDateTime(value)),`);
     }
     if (conversions.has("date")) {
         steps.push(
@@ -166,7 +217,8 @@ function shapeSteps(model: QueryModel, outputs: OutputColumn[], settings: Builde
             : key.endsWith(LOOKUP_TABLE)
               ? `${mText(key.slice(0, -LOOKUP_TABLE.length))} & LookupTable`
               : mText(key);
-    const convFn = (o: OutputColumn) => (o.conversion === "offset" ? "ToLocalDateTime" : o.conversion === "date" ? "ToDate" : o.conversion ? "ToDateTime" : null);
+    const CONVERSION_FUNCTIONS = { utc: "ToDateTime", wallclock: "ToDateTime", offset: "ToLocalDateTime", localdate: "ToLocalDate", date: "ToDate" } as const;
+    const convFn = (o: OutputColumn) => (o.conversion ? CONVERSION_FUNCTIONS[o.conversion] : null);
     const cells = outputs.map((o) => {
         const fn = convFn(o);
         return [keyExpr(o.sourceKey) + ",", mText(o.name) + ",", (o.mType ?? "type any") + (fn ? "," : ""), fn ?? ""];
@@ -174,7 +226,7 @@ function shapeSteps(model: QueryModel, outputs: OutputColumn[], settings: Builde
     const width = (i: number, cap: number) => Math.min(cap, Math.max(0, ...cells.map((c) => c[i].length)));
     const [w0, w1, w2] = [width(0, 64), width(1, 56), width(2, 16)];
     const rows = cells.map((c) => (c[3] ? `{${c[0].padEnd(w0)} ${c[1].padEnd(w1)} ${c[2].padEnd(w2)} ${c[3]}}` : `{${c[0].padEnd(w0)} ${c[1].padEnd(w1)} ${c[2]}}`.trimEnd()));
-    steps.push(`${I1}Columns = ${list(rows, I1)},`);
+    steps.push(`${I1}// Columns: response key, column name, type and (for dates) conversion. Edit a line to rename or retype a column.`, `${I1}Columns = ${list(rows, I1)},`);
 
     const urlKey = model.recordUrlKey;
     const needsHelperKey = urlKey !== null && !outputs.some((o) => o.sourceKey === urlKey);

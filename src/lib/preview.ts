@@ -1,5 +1,6 @@
 import { recordUrlColumnName } from "./columns";
 import { normaliseUrl } from "./mcode";
+import { localOffsetMinutes } from "./timezone";
 import type { BuilderSettings, OutputColumn, QueryModel } from "./types";
 
 export interface PreviewResult {
@@ -24,8 +25,8 @@ export function convertValue(col: OutputColumn, raw: unknown, settings: BuilderS
         if (col.conversion === "date") return raw.slice(0, 10);
         const d = new Date(raw);
         if (Number.isNaN(d.getTime())) return raw;
-        if (col.conversion === "offset") d.setTime(d.getTime() + settings.utcOffsetMinutes * 60000);
-        return formatDateTime(d);
+        if (col.conversion === "offset" || col.conversion === "localdate") d.setTime(d.getTime() + localOffsetMinutes(d.getTime(), settings) * 60000);
+        return col.conversion === "localdate" ? formatDateTime(d).slice(0, 10) : formatDateTime(d);
     }
     if (typeof raw === "boolean") return raw ? "TRUE" : "FALSE";
     if (typeof raw === "object") return JSON.stringify(raw);

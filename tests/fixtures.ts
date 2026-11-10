@@ -70,6 +70,7 @@ export const rawAccountAttributes = [
     attr("createdon", "Created On", "DateTimeType"),
     attr("new_startdate", "Start Date", "DateTimeType"),
     attr("new_reviewdate", "Review Date", "DateTimeType"),
+    attr("new_duedate", "Due Date", "DateTimeType"),
     attr("description", "Description", "MemoType"),
     attr("entityimage", "Default Image", "ImageType"),
     attr("new_tags", "Tags", "MultiSelectPicklistType"),
@@ -80,6 +81,8 @@ export const rawAccountDates = [
     { LogicalName: "createdon", Format: "DateAndTime", DateTimeBehavior: { Value: "UserLocal" } },
     { LogicalName: "new_startdate", Format: "DateOnly", DateTimeBehavior: { Value: "DateOnly" } },
     { LogicalName: "new_reviewdate", Format: "DateAndTime", DateTimeBehavior: { Value: "TimeZoneIndependent" } },
+    // "Date only" format with user-local behaviour: midnight in the user's zone, stored in UTC
+    { LogicalName: "new_duedate", Format: "DateOnly", DateTimeBehavior: { Value: "UserLocal" } },
 ];
 
 export const rawAccountLookups = [

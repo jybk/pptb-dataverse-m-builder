@@ -34,10 +34,14 @@ export function SettingsDialog(props: {
     update: (patch: Partial<BuilderSettings>) => void;
     reset: () => void;
     connected: boolean;
+    /** The connected environment; the list of apps belongs to it. */
+    environment: string | null;
 }) {
     const styles = useStyles();
     const { settings, update } = props;
     const [apps, setApps] = useState<ModelDrivenApp[] | null>(null);
+
+    useEffect(() => setApps(null), [props.environment]);
 
     useEffect(() => {
         if (!props.open || !props.connected || apps) return;
