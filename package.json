@@ -1,6 +1,6 @@
 {
   "name": "@jybk/pptb-dataverse-m-builder",
-  "version": "1.0.6",
+  "version": "1.1.0",
   "displayName": "Dataverse M Builder",
   "description": "Generate Power Query (M) scripts for Power BI, Excel and dataflows from Dataverse tables, views or FetchXML, with full paging, readable labels and choice tables.",
   "main": "index.html",
