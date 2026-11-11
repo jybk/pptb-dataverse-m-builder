@@ -498,3 +498,60 @@ describe("review fixes", () => {
         expect(top.warnings.join(" ")).not.toContain("<order>");
     });
 });
+
+describe("unticked columns", () => {
+    const build = (xml: string, excluded: string[], includeRecordUrl = false) => {
+        const { tables, attributes } = fixture();
+        return buildQueryModel({ doc: parseFetchXml(xml), tables, attributes, pageSize: 5000, includeRecordUrl, excluded: new Set(excluded) });
+    };
+    const XML = `<fetch><entity name="account"><attribute name="name" /><attribute name="entityimage_url" /><attribute name="revenue" />
+        <link-entity name="contact" from="contactid" to="primarycontactid" alias="c"><attribute name="fullname" /><attribute name="emailaddress1" /></link-entity></entity></fetch>`;
+
+    it("are taken out of the request, and warnings about them go with them", async () => {
+        const all = build(XML, []);
+        expect(all.warnings.join(" ")).toContain('"entityimage_url" wasn\'t found');
+
+        const model = build(XML, ["|entityimage_url", "c|emailaddress1"]);
+        expect(model.warnings).toEqual([]);
+        expect(model.fetchXml).not.toContain("entityimage_url");
+        expect(model.fetchXml).not.toContain("emailaddress1");
+        expect(model.fetchXml).toContain('<attribute name="fullname" />');
+        // The grid still lists them, so they can be ticked again
+        expect(model.columns.map((c) => c.id)).toEqual(all.columns.map((c) => c.id));
+
+        const settings = DEFAULT_SETTINGS;
+        const outputs = resolveOutputColumns(model.columns, settings, { "|entityimage_url": { hidden: true }, "c|emailaddress1": { hidden: true } });
+        const code = generateFetchXmlQuery(model, outputs, settings, "https://contoso.crm4.dynamics.com");
+        expect(code).not.toContain("entityimage_url");
+        const parsed = await PQP.TaskUtils.tryLexParse(PQP.DefaultSettings, code);
+        expect(PQP.TaskUtils.isParseStageOk(parsed)).toBe(true);
+    });
+
+    it("keeps the linked table's join when all its columns are unticked", () => {
+        const model = build(XML, ["c|fullname", "c|emailaddress1"]);
+        expect(model.fetchXml).toContain('<link-entity name="contact"');
+        expect(model.fetchXml).not.toContain("fullname");
+    });
+
+    it("keeps the primary key in the request when the record URL needs it", () => {
+        const xml = `<fetch><entity name="account"><attribute name="accountid" /><attribute name="name" /></entity></fetch>`;
+        expect(build(xml, ["|accountid"]).fetchXml).not.toContain("accountid");
+        expect(build(xml, ["|accountid"], true).fetchXml).toContain('<attribute name="accountid" />');
+    });
+
+    it("leaves requests alone where removing a column would change the rows", () => {
+        // A distinct query can only sort on columns it returns
+        const distinct = `<fetch distinct="true"><entity name="account"><attribute name="name" /><attribute name="revenue" /><order attribute="name" /></entity></fetch>`;
+        const d = build(distinct, ["|name", "|revenue"]);
+        expect(d.fetchXml).toContain('<attribute name="name" />');
+        expect(d.fetchXml).not.toContain('<attribute name="revenue" />');
+        // Aggregates: removing a group-by would change the grouping
+        const aggregate = `<fetch aggregate="true"><entity name="account"><attribute name="industrycode" alias="industry" groupby="true" /><attribute name="revenue" alias="total" aggregate="sum" /></entity></fetch>`;
+        expect(build(aggregate, ["|industry"]).fetchXml).toContain('alias="industry"');
+    });
+
+    it("says so when nothing is left", () => {
+        const xml = `<fetch><entity name="account"><attribute name="name" /></entity></fetch>`;
+        expect(build(xml, ["|name"]).warnings).toEqual(["The query doesn't return any columns yet."]);
+    });
+});

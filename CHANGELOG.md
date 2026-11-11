@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.1
+
+- **Unticking a column in FetchXML mode now takes it out of the query**, not only out of the result, so Dataverse no longer sends data you don't use. The request keeps the column in two cases, where removing it would change the rows: aggregate queries, and a column that a distinct query sorts on.
+- Warnings about a column (not found, requested twice) disappear when you untick it. The column list still marks it.
+
 ## 1.2.0
 
 - **Search box on the views list.** _Start from a view_ now opens with a search box above the list. Type any words from the view's name, in any order; case and accents don't matter. Enter takes the first match, the down arrow moves into the list.

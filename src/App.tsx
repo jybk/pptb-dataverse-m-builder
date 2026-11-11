@@ -304,6 +304,20 @@ export default function App() {
 
     const metadataPending = !!entities && entities.all.some((e) => tablesByName.has(e) && !attrCache.has(e) && !attrFailed[e]);
 
+    const ctxKey = mode === "table" ? `table:${selectedTable ?? ""}` : `fetch:${entities?.root ?? ""}`;
+    const overrides = useMemo(() => overridesByCtx[ctxKey] ?? {}, [overridesByCtx, ctxKey]);
+
+    // Unticked columns, as a string so renaming a column doesn't rebuild the query
+    const excludedKey = useMemo(
+        () =>
+            Object.entries(overrides)
+                .filter(([, o]) => o.hidden)
+                .map(([id]) => id)
+                .sort()
+                .join("\n"),
+        [overrides],
+    );
+
     const { model, modelError } = useMemo((): { model: QueryModel | null; modelError: string | null } => {
         if (!parsed.doc || !tables || metadataPending) return { model: null, modelError: null };
         try {
@@ -315,6 +329,7 @@ export default function App() {
                 includeRecordUrl: settings.includeRecordUrl,
                 fromTablePicker: mode === "table",
                 odataFilter: mode === "table" && settings.activeOnly && hasStatecode ? "statecode eq 0" : null,
+                excluded: new Set(excludedKey ? excludedKey.split("\n") : []),
             });
             for (const e of entities?.all ?? []) {
                 if (attrFailed[e]) m.warnings.unshift(`Couldn't load the columns of ${e}: ${attrFailed[e]}`);
@@ -323,10 +338,7 @@ export default function App() {
         } catch (err) {
             return { model: null, modelError: errorMessage(err) };
         }
-    }, [parsed.doc, tables, metadataPending, tablesByName, attrCache, settings.pageSize, settings.includeRecordUrl, settings.activeOnly, mode, hasStatecode, entities, attrFailed]);
-
-    const ctxKey = mode === "table" ? `table:${selectedTable ?? ""}` : `fetch:${entities?.root ?? ""}`;
-    const overrides = useMemo(() => overridesByCtx[ctxKey] ?? {}, [overridesByCtx, ctxKey]);
+    }, [parsed.doc, tables, metadataPending, tablesByName, attrCache, settings.pageSize, settings.includeRecordUrl, settings.activeOnly, mode, hasStatecode, entities, attrFailed, excludedKey]);
 
     const outputs = useMemo<OutputColumn[]>(() => (model ? resolveOutputColumns(model.columns, settings, overrides) : []), [model, settings, overrides]);
     const outputsByCol = useMemo(() => {

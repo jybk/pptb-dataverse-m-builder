@@ -90,6 +90,11 @@ export interface ModelInput {
     /** Set when the query came from the table picker, to allow an OData version. */
     odataFilter?: string | null;
     fromTablePicker?: boolean;
+    /**
+     * Ids of columns the user unticked. They stay in the model's column list (the grid shows them),
+     * but they are taken out of the FetchXML where that is safe, and warnings about them are dropped.
+     */
+    excluded?: ReadonlySet<string>;
 }
 
 interface AttrNode {
@@ -100,6 +105,27 @@ interface AttrNode {
     alias: string | null;
     aggregate: string | null;
     dategrouping: string | null;
+    /** The <attribute> element this column comes from. */
+    el: Element;
+}
+
+const columnId = (n: { linkAlias: string | null; alias: string | null; name: string }) => `${n.linkAlias ?? ""}|${n.alias ?? n.name}`;
+
+/**
+ * Takes unticked columns out of the query, so Dataverse doesn't send data nobody uses.
+ * Two cases keep the column in the request (it is still left out of the result):
+ *  - aggregate queries, where removing a column would change the grouping;
+ *  - a column a distinct query sorts on, because a distinct query can only sort on columns it returns.
+ */
+function removeExcluded(nodes: AttrNode[], excluded: ReadonlySet<string>, isAggregate: boolean, isDistinct: boolean) {
+    if (isAggregate) return;
+    for (const n of nodes) {
+        if (!excluded.has(columnId(n))) continue;
+        const parent = n.el.parentElement;
+        if (!parent) continue;
+        const sortedOn = isDistinct && childElements(parent).some((c) => c.tagName === "order" && (c.getAttribute("attribute") === n.name || (n.alias && c.getAttribute("alias") === n.alias)));
+        if (!sortedOn) parent.removeChild(n.el);
+    }
 }
 
 /** Web API JSON key for an attribute returned by a FetchXML query. */
@@ -236,6 +262,7 @@ export function buildQueryModel(input: ModelInput): QueryModel {
                     alias: child.getAttribute("alias"),
                     aggregate: child.getAttribute("aggregate"),
                     dategrouping: child.getAttribute("dategrouping"),
+                    el: child,
                 });
             } else if (child.tagName === "all-attributes") {
                 if (!returnsColumns) continue;
@@ -244,7 +271,7 @@ export function buildQueryModel(input: ModelInput): QueryModel {
                     const attrEl = doc.createElement("attribute");
                     attrEl.setAttribute("name", a.logicalName);
                     el.insertBefore(attrEl, child);
-                    nodes.push({ entity, linkAlias, linkLabel, name: a.logicalName, alias: null, aggregate: null, dategrouping: null });
+                    nodes.push({ entity, linkAlias, linkLabel, name: a.logicalName, alias: null, aggregate: null, dategrouping: null, el: attrEl });
                 }
                 el.removeChild(child);
                 warnings.push(
@@ -281,6 +308,9 @@ export function buildQueryModel(input: ModelInput): QueryModel {
     };
     visit(entityEl, rootName, null, null, true);
     hoistAttributes(entityEl);
+    const excluded = input.excluded ?? new Set<string>();
+    // Before the record URL step, which puts the primary key back if it needs it
+    removeExcluded(nodes, excluded, isAggregate, isDistinct);
     // Main table's columns first, then each linked table's, in document order
     const linkOrder = new Map<string | null, number>([[null, 0]]);
     for (const n of nodes) if (!linkOrder.has(n.linkAlias)) linkOrder.set(n.linkAlias, linkOrder.size);
@@ -307,7 +337,9 @@ export function buildQueryModel(input: ModelInput): QueryModel {
     for (const n of nodes) {
         const meta = attributesOf(n.entity).find((a) => a.logicalName === n.name);
         let attribute = meta ?? unknownAttribute(n.name);
-        if (!meta) {
+        const isExcluded = excluded.has(columnId(n));
+        // An unticked column isn't in the result, so there's nothing to check about it; the grid still marks it
+        if (!meta && !isExcluded) {
             warnings.push(
                 input.attributes.has(n.entity)
                     ? `Column "${n.name}" wasn't found on ${n.entity} (or can't be read); it's kept untyped.`
@@ -322,12 +354,12 @@ export function buildQueryModel(input: ModelInput): QueryModel {
         if (n.dategrouping) attribute = { ...attribute, kind: "integer", typeName: "IntegerType" };
         const key = responseKey(attribute, n.linkAlias, n.alias);
         if (seenKeys.has(key)) {
-            warnings.push(`"${key}" is requested more than once; the duplicate is ignored.`);
+            if (!isExcluded) warnings.push(`"${key}" is requested more than once; the duplicate is ignored.`);
             continue;
         }
         seenKeys.add(key);
         columns.push({
-            id: `${n.linkAlias ?? ""}|${n.alias ?? n.name}`,
+            id: columnId(n),
             entity: n.entity,
             linkAlias: n.linkAlias,
             linkLabel: n.linkLabel,
@@ -338,7 +370,7 @@ export function buildQueryModel(input: ModelInput): QueryModel {
             key,
         });
     }
-    if (columns.length === 0) warnings.push("The query doesn't return any columns yet.");
+    if (columns.every((c) => excluded.has(c.id))) warnings.push("The query doesn't return any columns yet.");
 
     const fetchLines = serializeLines(fetch);
     let odata: QueryModel["odata"] = null;
