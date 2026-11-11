@@ -25,6 +25,7 @@ src/lib/preview.ts     applies the M shaping to preview rows
 src/lib/invocation.ts  helpers for launching and being launched by other tools
 src/lib/timezone.ts    daylight saving rules (shared by the M generator and the preview) and time zone detection
 src/lib/session.ts     what is remembered per environment
+src/lib/search.ts      matching for search boxes
 src/components/        React + Fluent UI components
 tests/                 Vitest tests
 ```

@@ -14,7 +14,7 @@ In Power Platform ToolBox (version 1.2.7 or later), open the **Marketplace**, se
 
 **Two ways to build a query**
 
-- **Table & columns**: search the tables, tick the columns you want, choose how each one comes out, and rename it. _Start from a view_ loads any system or personal view, including its filters and linked tables.
+- **Table & columns**: search the tables, tick the columns you want, choose how each one comes out, and rename it. _Start from a view_ loads any system or personal view, including its filters and linked tables; type in the search box above the list to find a view by name.
 - **FetchXML**: paste or open FetchXML, for example from FetchXML Studio. Linked tables (`link-entity`), column aliases, `all-attributes`, `top` and aggregate queries are all supported. _Edit in…_ sends the query to another installed FetchXML tool and picks up the result when that tool returns one.
 
 **Per-column output**

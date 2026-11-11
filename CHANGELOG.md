@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.0
+
+- **Search box on the views list.** _Start from a view_ now opens with a search box above the list. Type any words from the view's name, in any order; case and accents don't matter. Enter takes the first match, the down arrow moves into the list.
+
 ## 1.1.0
 
 ### Dates and times

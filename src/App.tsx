@@ -4,13 +4,6 @@ import {
     Caption1,
     FluentProvider,
     makeStyles,
-    Menu,
-    MenuGroup,
-    MenuGroupHeader,
-    MenuItem,
-    MenuList,
-    MenuPopover,
-    MenuTrigger,
     MessageBar,
     MessageBarBody,
     Spinner,
@@ -22,13 +15,14 @@ import {
     webDarkTheme,
     webLightTheme,
 } from "@fluentui/react-components";
-import { ArrowClockwise16Regular, Eye16Regular, Settings20Regular } from "@fluentui/react-icons";
+import { ArrowClockwise16Regular, Settings20Regular } from "@fluentui/react-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ColumnGrid, type GridRow } from "./components/ColumnGrid";
 import { FetchXmlEditor } from "./components/FetchXmlEditor";
 import { OutputPanel, type OutputTab, type PreviewState } from "./components/OutputPanel";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { TablePicker } from "./components/TablePicker";
+import { ViewMenu } from "./components/ViewMenu";
 import { copyText, hasToolbox, notify, saveText, useBuilderSettings, useConnection, useTheme, useToolboxEvents } from "./hooks/useToolbox";
 import { outputWarnings, resolveOutputColumns } from "./lib/columns";
 import { errorMessage, loadAttributes, loadOptions, loadTables, loadViews, runFetchPreview, runODataPreview, type ViewInfo } from "./lib/dataverse";
@@ -574,54 +568,7 @@ export default function App() {
     const currentViews = selectedTable ? views[selectedTable] : undefined;
 
     // ---------- render ----------
-    const viewMenu = mode === "table" && selectedTable && (
-        <Menu onOpenChange={(_, d) => d.open && openViews()}>
-            <MenuTrigger disableButtonEnhancement>
-                <Button size="small" appearance="subtle" icon={<Eye16Regular />}>
-                    Start from a view
-                </Button>
-            </MenuTrigger>
-            <MenuPopover style={{ maxHeight: 420, overflowY: "auto" }}>
-                <MenuList>
-                    {currentViews === "loading" || currentViews === undefined ? (
-                        <MenuItem disabled>Loading views…</MenuItem>
-                    ) : currentViews === "error" ? (
-                        <MenuItem disabled>Couldn't load views</MenuItem>
-                    ) : currentViews.length === 0 ? (
-                        <MenuItem disabled>No views for this table</MenuItem>
-                    ) : (
-                        <>
-                            {currentViews.some((v) => !v.personal) && (
-                                <MenuGroup>
-                                    <MenuGroupHeader>System views</MenuGroupHeader>
-                                    {currentViews
-                                        .filter((v) => !v.personal)
-                                        .map((v) => (
-                                            <MenuItem key={v.id} onClick={() => openFetchXml(v.fetchXml)}>
-                                                {v.name}
-                                                {v.isDefault ? " (default)" : ""}
-                                            </MenuItem>
-                                        ))}
-                                </MenuGroup>
-                            )}
-                            {currentViews.some((v) => v.personal) && (
-                                <MenuGroup>
-                                    <MenuGroupHeader>My views</MenuGroupHeader>
-                                    {currentViews
-                                        .filter((v) => v.personal)
-                                        .map((v) => (
-                                            <MenuItem key={v.id} onClick={() => openFetchXml(v.fetchXml)}>
-                                                {v.name}
-                                            </MenuItem>
-                                        ))}
-                                </MenuGroup>
-                            )}
-                        </>
-                    )}
-                </MenuList>
-            </MenuPopover>
-        </Menu>
-    );
+    const viewMenu = mode === "table" && selectedTable && <ViewMenu key={selectedTable} views={currentViews} onOpen={openViews} onPick={(view) => openFetchXml(view.fetchXml)} />;
 
     let body: React.ReactNode;
     if (!hasToolbox()) {
