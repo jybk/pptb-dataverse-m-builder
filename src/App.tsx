@@ -52,6 +52,7 @@ const useStyles = makeStyles({
     gridPane: { flex: 1, minWidth: 0, minHeight: 0 },
     fetchPane: { display: "flex", flexDirection: "column", flex: 1, minWidth: 0, minHeight: 0 },
     editorPane: { height: "42%", minHeight: "160px", borderBottom: `1px solid ${tokens.colorNeutralStroke2}` },
+    editorPaneCollapsed: { flexShrink: 0, borderBottom: `1px solid ${tokens.colorNeutralStroke2}` },
     splitter: {
         width: "5px",
         cursor: "col-resize",
@@ -112,6 +113,11 @@ export default function App() {
     const [selection, setSelection] = useState<Record<string, string[]>>({});
     const [fetchText, setFetchText] = useState("");
     const debouncedFetch = useDebounced(fetchText, 300);
+    /** The view the FetchXML came from, and whether it was changed since. */
+    const [viewName, setViewName] = useState<string | null>(null);
+    const [viewEdited, setViewEdited] = useState(false);
+    /** The FetchXML editor is collapsed once a query is loaded; it opens by itself when it's empty or has an error. */
+    const [editorOpen, setEditorOpen] = useState(false);
     const [overridesByCtx, setOverridesByCtx] = useState<Record<string, ColumnOverrides>>({});
     const [tab, setTab] = useState<OutputTab>("m");
     const [settingsOpen, setSettingsOpen] = useState(false);
@@ -226,6 +232,9 @@ export default function App() {
                     setSelectedTable(saved.selectedTable);
                     setSelection(saved.selection);
                     setFetchText(saved.fetchText);
+                    setViewName(saved.viewName);
+                    setViewEdited(saved.viewEdited);
+                    setEditorOpen(false);
                     setOverridesByCtx(saved.overridesByCtx);
                     setPreview({ loading: false, error: null, result: null, ranAt: null });
                 }
@@ -245,11 +254,11 @@ export default function App() {
         if (!envKey || sessionFor !== envKey || !hasToolbox()) return;
         const t = window.setTimeout(() => {
             window.toolboxAPI.settings
-                .set(sessionKey(envKey), serializeSession({ mode, selectedTable, selection, fetchText, overridesByCtx }))
+                .set(sessionKey(envKey), serializeSession({ mode, selectedTable, selection, fetchText, viewName, viewEdited, overridesByCtx }))
                 .catch((err: unknown) => console.warn("Couldn't save the session", err));
         }, 800);
         return () => window.clearTimeout(t);
-    }, [envKey, sessionFor, mode, selectedTable, selection, fetchText, overridesByCtx]);
+    }, [envKey, sessionFor, mode, selectedTable, selection, fetchText, viewName, viewEdited, overridesByCtx]);
 
     // A remembered or prefilled table that this environment doesn't have (any more) would leave the column list loading forever
     useEffect(() => {
@@ -444,8 +453,19 @@ export default function App() {
         [mode, selectedTable, ctxKey],
     );
 
-    const openFetchXml = useCallback((xml: string, carryOverridesFrom?: string) => {
+    /**
+     * Loads a query into FetchXML mode. `view` is the name of the view it comes from; "changed" keeps the
+     * current view's name and marks it as edited (the query came back from another tool).
+     */
+    const openFetchXml = useCallback((xml: string, options: { carryOverridesFrom?: string; view?: string | "changed"; expand?: boolean } = {}) => {
+        const { carryOverridesFrom } = options;
         const text = formatFetchXml(xml);
+        if (options.view === "changed") setViewEdited(true);
+        else {
+            setViewName(options.view ?? null);
+            setViewEdited(false);
+        }
+        setEditorOpen(!!options.expand);
         if (carryOverridesFrom) {
             try {
                 const root = fetchEntities(parseFetchXml(xml)).root;
@@ -487,7 +507,7 @@ export default function App() {
                 const result = (await window.toolboxAPI.invocation.launchTool(toolId, { fetchXml: fetchText })) as Record<string, unknown> | null;
                 const returned = result && (typeof result.fetchXml === "string" ? result.fetchXml : typeof result.fetchxml === "string" ? result.fetchxml : null);
                 if (returned) {
-                    openFetchXml(returned);
+                    openFetchXml(returned, { view: "changed" });
                     void notify("FetchXML updated", "The query came back from the other tool.", "success");
                 }
             } catch (err) {
@@ -579,8 +599,14 @@ export default function App() {
     const currentTable = selectedTable ? tablesByName.get(selectedTable) : undefined;
     const currentViews = selectedTable ? views[selectedTable] : undefined;
 
+    // ---------- FetchXML pane ----------
+    // An empty editor has to be open to paste into, and an error has to be visible next to its cause
+    const editorExpanded = editorOpen || !fetchText.trim() || !!parsed.error;
+    const fetchSubject = model ? `${model.table.displayName}${model.hasLinks ? " and linked tables" : ""}` : "";
+    const editorSummary = viewName ? `${viewEdited ? "Changed view" : "View"}: ${viewName}` : fetchSubject;
+
     // ---------- render ----------
-    const viewMenu = mode === "table" && selectedTable && <ViewMenu key={selectedTable} views={currentViews} onOpen={openViews} onPick={(view) => openFetchXml(view.fetchXml)} />;
+    const viewMenu = mode === "table" && selectedTable && <ViewMenu key={selectedTable} views={currentViews} onOpen={openViews} onPick={(view) => openFetchXml(view.fetchXml, { view: view.name })} />;
 
     let body: React.ReactNode;
     if (!hasToolbox()) {
@@ -663,10 +689,18 @@ export default function App() {
                         </>
                     ) : (
                         <div className={styles.fetchPane}>
-                            <div className={styles.editorPane}>
+                            <div className={editorExpanded ? styles.editorPane : styles.editorPaneCollapsed}>
                                 <FetchXmlEditor
                                     value={fetchText}
-                                    onChange={setFetchText}
+                                    onChange={(text) => {
+                                        // Typing keeps the editor open, and the query is no longer exactly the view
+                                        setFetchText(text);
+                                        setEditorOpen(true);
+                                        setViewEdited(true);
+                                    }}
+                                    expanded={editorExpanded}
+                                    onToggle={() => setEditorOpen(!editorExpanded)}
+                                    summary={editorSummary}
                                     error={parsed.error}
                                     onFormat={formatFetch}
                                     onLoadFile={() => void loadFetchFile()}
@@ -676,7 +710,8 @@ export default function App() {
                             </div>
                             <div style={{ flex: 1, minHeight: 0 }}>
                                 <ColumnGrid
-                                    title={model ? `Columns returned by ${model.table.displayName}${model.hasLinks ? " and linked tables" : ""}` : "Columns"}
+                                    title={model ? `Columns returned by ${viewName ?? fetchSubject}` : "Columns"}
+                                    subtitle={model && viewName && <Caption1>{`${viewEdited ? "Changed view" : "View"} on ${fetchSubject}`}</Caption1>}
                                     rows={gridRows}
                                     loading={metadataPending}
                                     emptyText="Columns from the FetchXML appear here."
@@ -709,7 +744,7 @@ export default function App() {
                         choiceQueries={choiceQueries}
                         choiceLoading={optionsLoading}
                         choiceError={optionsError}
-                        onEditAsFetchXml={() => model && openFetchXml(model.fetchXml, ctxKey)}
+                        onEditAsFetchXml={() => model && openFetchXml(model.fetchXml, { carryOverridesFrom: ctxKey, expand: true })}
                         preview={preview}
                         onRunPreview={(n) => void runPreview(n)}
                         canReturn={canReturn}

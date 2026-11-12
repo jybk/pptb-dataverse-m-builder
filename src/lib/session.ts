@@ -7,11 +7,14 @@ export interface Session {
     /** Chosen columns per table (logical names). */
     selection: Record<string, string[]>;
     fetchText: string;
+    /** The view the FetchXML was loaded from, if any, and whether it has been changed since. */
+    viewName: string | null;
+    viewEdited: boolean;
     /** Column names and output modes, per table or FetchXML root table. */
     overridesByCtx: Record<string, ColumnOverrides>;
 }
 
-export const EMPTY_SESSION: Session = { mode: "table", selectedTable: null, selection: {}, fetchText: "", overridesByCtx: {} };
+export const EMPTY_SESSION: Session = { mode: "table", selectedTable: null, selection: {}, fetchText: "", viewName: null, viewEdited: false, overridesByCtx: {} };
 
 const VERSION = 1;
 const MAX_FETCH_LENGTH = 200_000;
@@ -63,6 +66,8 @@ export function parseSession(raw: unknown): Session | null {
         selectedTable: typeof raw.selectedTable === "string" && raw.selectedTable ? raw.selectedTable : null,
         selection,
         fetchText: typeof raw.fetchText === "string" ? raw.fetchText : "",
+        viewName: typeof raw.viewName === "string" && raw.viewName ? raw.viewName : null,
+        viewEdited: raw.viewEdited === true,
         overridesByCtx,
     };
 }

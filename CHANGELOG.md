@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.0
+
+- **The FetchXML editor collapses.** In FetchXML mode the editor folds down to its title bar once a query is loaded, which leaves the room to the column list. Click _FetchXML_ to open or close it. It opens by itself when it's empty, when you type in it, and when the XML has an error.
+- **The column list names the view.** After _Start from a view_ the title reads "Columns returned by" followed by the view's name, with the table underneath; it says "Changed view" once you edit the FetchXML. The view's name is remembered with the rest of your work.
+
 ## 1.2.1
 
 - **Unticking a column in FetchXML mode now takes it out of the query**, not only out of the result, so Dataverse no longer sends data you don't use. The request keeps the column in two cases, where removing it would change the rows: aggregate queries, and a column that a distinct query sorts on.

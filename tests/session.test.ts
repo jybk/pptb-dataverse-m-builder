@@ -8,6 +8,8 @@ const session: Session = {
     selectedTable: "account",
     selection: { account: ["accountid", "name"] },
     fetchText: '<fetch><entity name="account" /></fetch>',
+    viewName: "Active Accounts",
+    viewEdited: true,
     overridesByCtx: { "table:account": { "|name": { name: "Customer" }, "|statecode": { mode: "value", hidden: true } } },
 };
 
@@ -33,6 +35,8 @@ describe("remembered session", () => {
             selectedTable: 12,
             selection: { account: ["name", 5, null], contact: "all" },
             fetchText: { not: "text" },
+            viewName: 7,
+            viewEdited: "yes",
             overridesByCtx: { "table:account": { "|name": { name: "", mode: 3, hidden: "yes" }, "|revenue": { name: "Omzet" } }, broken: 1 },
         });
         expect(parsed).toEqual({
@@ -40,8 +44,15 @@ describe("remembered session", () => {
             selectedTable: null,
             selection: { account: ["name"] },
             fetchText: "",
+            viewName: null,
+            viewEdited: false,
             overridesByCtx: { "table:account": { "|revenue": { name: "Omzet" } } },
         });
+    });
+
+    it("reads a session saved before view names were remembered", () => {
+        const { viewName: _name, viewEdited: _edited, ...older } = session;
+        expect(parseSession(JSON.parse(JSON.stringify({ v: 1, ...older })))).toEqual({ ...session, viewName: null, viewEdited: false });
     });
 
     it("doesn't store an enormous pasted query", () => {
