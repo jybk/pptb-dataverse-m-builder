@@ -82,9 +82,13 @@ Nothing in Dataverse. It reads table metadata and views, and fetches sample rows
 ## Notes and limits
 
 - The FetchXML travels in the request URL. Very large queries (tens of kilobytes of FetchXML) can exceed the Web API's URL length limit.
-- _Fixed offset_ applies one UTC offset all year and ignores daylight saving. Use UTC and convert in your model if you need exact local times.
+- _Local time_ knows two daylight saving calendars: European summer time and US/Canada. For other regions it applies the standard offset all year, so use UTC and convert in your model if you need exact local times there.
 - Dataverse may not return a paging cookie for some queries, such as those ordered by a linked table's column. The query then falls back to simple paging, which is limited to 50,000 rows.
 - The OData style is only offered for a single table without joins or aggregates.
+- The generated queries use `Web.Contents`, so steps you add after them in Power Query don't fold back to Dataverse. The filters inside the FetchXML or `$filter` still run on the server. You can replace the source with `OData.Feed` to get folding, but keep these trade-offs in mind:
+  - **Labels**: by default, lookups come back as GUIDs and choices as numbers. Expand a lookup's navigation column to get its name (this folds to `$expand`). For choice labels, join the generated choice tables in your model, or add the option `IncludeAnnotations = "OData.Community.Display.V1.FormattedValue"`; the label then sits in each value's metadata, and you need a custom column per field with `Value.Metadata` to bring it out.
+  - **Speed**: `OData.Feed` first reads the environment's whole `$metadata` document, which is large in Dataverse, so the first load and every refresh can be slow.
+  - **Linked tables and relative dates**: conditions on linked tables and FetchXML operators such as `next-x-months` or `last-x-years` have to be rewritten as Power Query steps, and whether those steps fold varies.
 
 ## Development
 
