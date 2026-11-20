@@ -123,7 +123,12 @@ function removeExcluded(nodes: AttrNode[], excluded: ReadonlySet<string>, isAggr
         if (!excluded.has(columnId(n))) continue;
         const parent = n.el.parentElement;
         if (!parent) continue;
-        const sortedOn = isDistinct && childElements(parent).some((c) => c.tagName === "order" && (c.getAttribute("attribute") === n.name || (n.alias && c.getAttribute("alias") === n.alias)));
+        const sortedOn =
+            isDistinct &&
+            (childElements(parent).some((c) => c.tagName === "order" && !c.getAttribute("entityname") && (c.getAttribute("attribute") === n.name || (n.alias && c.getAttribute("alias") === n.alias))) ||
+                // An order on a linked table's column can also sit on the main table, naming the link by its alias
+                (!!n.linkAlias &&
+                    Array.from(n.el.ownerDocument.getElementsByTagName("order")).some((o) => o.getAttribute("entityname") === n.linkAlias && o.getAttribute("attribute") === n.name)));
         if (!sortedOn) parent.removeChild(n.el);
     }
 }
@@ -227,7 +232,7 @@ export function buildQueryModel(input: ModelInput): QueryModel {
     stripDesignerAttributes(fetch);
     let pageSize = Math.min(Math.max(1, Math.floor(input.pageSize) || 5000), 5000);
     if (!singleRequest) {
-        const count = Number(fetch.getAttribute("count"));
+        const count = Math.floor(Number(fetch.getAttribute("count")));
         if (count > 0) {
             pageSize = Math.min(count, 5000);
             warnings.push(`The count="${count}" attribute is used as the page size; the query still returns every row.`);
@@ -266,6 +271,12 @@ export function buildQueryModel(input: ModelInput): QueryModel {
                 });
             } else if (child.tagName === "all-attributes") {
                 if (!returnsColumns) continue;
+                if (!input.attributes.has(entity)) {
+                    // Without its column list the builder can't name, type or shape these columns
+                    el.removeChild(child);
+                    warnings.push(`<all-attributes /> on ${linkAlias ?? entity} is left out because that table's columns couldn't be loaded. Reload the metadata to try again.`);
+                    continue;
+                }
                 const all = attributesOf(entity);
                 for (const a of all) {
                     const attrEl = doc.createElement("attribute");
@@ -375,7 +386,7 @@ export function buildQueryModel(input: ModelInput): QueryModel {
     const fetchLines = serializeLines(fetch);
     let odata: QueryModel["odata"] = null;
     if (input.fromTablePicker && !hasLinks && !isAggregate) {
-        odata = { select: columns.map((c) => c.key), filter: input.odataFilter ?? null };
+        odata = { filter: input.odataFilter ?? null };
     }
 
     return {

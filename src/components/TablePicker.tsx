@@ -2,6 +2,7 @@ import { Badge, Button, Caption1, Input, makeStyles, mergeClasses, Select, Spinn
 import { ArrowClockwise16Regular, Search16Regular } from "@fluentui/react-icons";
 import { useMemo, useState } from "react";
 import type { TableInfo } from "../lib/types";
+import { matchesSearch } from "../lib/search";
 
 const useStyles = makeStyles({
     root: {
@@ -53,11 +54,10 @@ export function TablePicker(props: { tables: TableInfo[] | null; loading: boolea
     const [filter, setFilter] = useState<Filter>("all");
 
     const visible = useMemo(() => {
-        const q = search.trim().toLowerCase();
         return (props.tables ?? []).filter((t) => {
             if (filter === "custom" && !t.isCustom) return false;
             if (filter === "standard" && t.isCustom) return false;
-            return !q || t.displayName.toLowerCase().includes(q) || t.logicalName.includes(q);
+            return matchesSearch(`${t.displayName} ${t.logicalName}`, search);
         });
     }, [props.tables, search, filter]);
 

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { resolveOutputColumns } from "../src/lib/columns";
 import { buildQueryModel, buildTableFetchXml, fetchEntities, parseFetchXml, previewFetchXml } from "../src/lib/fetchxml";
 import { mapOptions } from "../src/lib/metadata";
-import { choiceColumns, generateChoiceQuery, generateFetchXmlQuery, generateODataQuery, generateParameterQuery, mText, normaliseUrl, ALLOWED_AUTH_HEADERS } from "../src/lib/mcode";
+import { choiceColumns, generateChoiceQuery, generateFetchXmlQuery, generateODataQuery, generateParameterQuery, mText, normaliseUrl, odataSelect, ALLOWED_AUTH_HEADERS } from "../src/lib/mcode";
 import { buildPreview } from "../src/lib/preview";
 import { DEFAULT_SETTINGS, type BuilderSettings, type ColumnOverrides } from "../src/lib/types";
 import { fixture } from "./fixtures";
@@ -92,7 +92,8 @@ describe("table picker queries", () => {
         expect(keys.name).toBe("name");
         expect(model.fetchXml).toContain('<condition attribute="statecode" operator="eq" value="0" />');
         expect(model.singleRequest).toBe(false);
-        expect(model.odata?.select).toContain("_primarycontactid_value");
+        expect(model.odata).not.toBeNull();
+        expect(odataSelect(model, resolveOutputColumns(model.columns, DEFAULT_SETTINGS, {}))).toContain("_primarycontactid_value");
     });
 
     it("resolves output columns with default modes", () => {

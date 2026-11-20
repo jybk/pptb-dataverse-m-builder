@@ -36,13 +36,37 @@ async function optional(query: string): Promise<Raw[]> {
     }
 }
 
-export async function loadAttributes(entity: string): Promise<AttributeInfo[]> {
+/** Like `optional`, but says whether the query failed, for metadata whose absence changes the output. */
+async function optionalReported(query: string): Promise<{ rows: Raw[]; failed: boolean }> {
+    try {
+        const res = await api().queryData(query);
+        return { rows: (res.value ?? []) as Raw[], failed: false };
+    } catch (err) {
+        console.warn("Metadata query failed", query, err);
+        return { rows: [], failed: true };
+    }
+}
+
+export interface LoadedAttributes {
+    attributes: AttributeInfo[];
+    /**
+     * True when the date formats couldn't be read. Date-only columns then look like date-and-time
+     * columns, so the generated query would convert them as such.
+     */
+    dateFormatsMissing: boolean;
+}
+
+export async function loadAttributes(entity: string): Promise<LoadedAttributes> {
     const [attrs, dateTimes, lookups] = await Promise.all([
         api().getEntityRelatedMetadata(entity, "Attributes", ATTRIBUTE_PROPERTIES),
-        optional(`${entityPath(entity)}/Attributes/Microsoft.Dynamics.CRM.DateTimeAttributeMetadata?$select=LogicalName,Format,DateTimeBehavior`),
+        optionalReported(`${entityPath(entity)}/Attributes/Microsoft.Dynamics.CRM.DateTimeAttributeMetadata?$select=LogicalName,Format,DateTimeBehavior`),
+        // Only used to show a lookup's target tables in the column list
         optional(`${entityPath(entity)}/Attributes/Microsoft.Dynamics.CRM.LookupAttributeMetadata?$select=LogicalName,Targets`),
     ]);
-    return mapAttributes(((attrs as { value?: Raw[] }).value ?? []) as Raw[], { dateTimes, lookups });
+    return {
+        attributes: mapAttributes(((attrs as { value?: Raw[] }).value ?? []) as Raw[], { dateTimes: dateTimes.rows, lookups }),
+        dateFormatsMissing: dateTimes.failed,
+    };
 }
 
 export interface ViewInfo {

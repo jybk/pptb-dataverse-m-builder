@@ -4,6 +4,7 @@ import { memo, useMemo, useState, type ReactNode } from "react";
 import { defaultBaseName, defaultModeFor, modeOptionsFor } from "../lib/columns";
 import { kindLabel } from "../lib/metadata";
 import type { AttributeInfo, BuilderSettings, ColumnOverride, ColumnOverrides, ColumnSpec, OutputColumn } from "../lib/types";
+import { matchesSearch } from "../lib/search";
 
 const useStyles = makeStyles({
     root: { display: "flex", flexDirection: "column", minHeight: 0, height: "100%", minWidth: 0 },
@@ -74,11 +75,9 @@ export function ColumnGrid(props: Props) {
     const [onlyIncluded, setOnlyIncluded] = useState(false);
 
     const visible = useMemo(() => {
-        const q = search.trim().toLowerCase();
         return props.rows.filter((r) => {
             if (onlyIncluded && !r.included) return false;
-            if (!q) return true;
-            return r.attribute.displayName.toLowerCase().includes(q) || r.attribute.logicalName.includes(q) || (r.note ?? "").toLowerCase().includes(q);
+            return matchesSearch(`${r.attribute.displayName} ${r.attribute.logicalName} ${r.note ?? ""}`, search);
         });
     }, [props.rows, search, onlyIncluded]);
 

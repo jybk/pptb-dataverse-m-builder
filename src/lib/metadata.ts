@@ -182,8 +182,13 @@ export function kindLabel(a: AttributeInfo): string {
     }
 }
 
+/**
+ * Columns with a label next to their value. Table-name columns (EntityName, such as objecttypecode)
+ * aren't among them: Dataverse returns the table's logical name, and formatted values only exist for
+ * choices, yes/no, status, lookups, currency and dates.
+ */
 export function isChoiceLike(kind: AttributeKind): boolean {
-    return kind === "choice" || kind === "state" || kind === "status" || kind === "multichoice" || kind === "boolean" || kind === "entityname";
+    return kind === "choice" || kind === "state" || kind === "status" || kind === "multichoice" || kind === "boolean";
 }
 
 /** Metadata cast used by the Web API for each choice-like column type. */

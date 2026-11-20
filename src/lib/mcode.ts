@@ -45,6 +45,8 @@ export function mIdent(name: string): string {
  * Environment URL for Power Query: no trailing slash or path, and the organisation host rather than
  * the Web API host ToolBox may hand us (org.api.crm4.dynamics.com → org.crm4.dynamics.com), because
  * record links only open on the organisation host and it's the usual sign-in resource.
+ * Built for Dataverse online: the path is dropped, so an on-premises URL with an organisation path
+ * (https://server/org) would lose it.
  */
 export function normaliseUrl(url: string): string {
     const trimmed = url.trim();
@@ -235,7 +237,7 @@ function shapeSteps(model: QueryModel, outputs: OutputColumn[], settings: Builde
 
     const recordUrlName = recordUrlColumnName(settings.naming);
     if (urlKey) {
-        const appPart = settings.appId.trim() ? `appid=${settings.appId.trim()}&` : "";
+        const appPart = settings.appId.trim() ? `appid=${encodeURIComponent(settings.appId.trim())}&` : "";
         steps.push(
             `${I1}// The record link uses the environment part of the URL parameter (everything before /api/data/)`,
             `${I1}EnvironmentUrl = let Position = Text.PositionOf(Text.Lower(${urlRef(settings)}), "/api/data/") in Text.TrimEnd(if Position < 0 then ${urlRef(settings)} else Text.Start(${urlRef(settings)}, Position), "/"),`,
@@ -317,6 +319,7 @@ export function generateFetchXmlQuery(model: QueryModel, outputs: OutputColumn[]
             `${I2}Text.Replace(Text.Replace(Text.Replace(Text.Replace(value, "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), """", "&quot;"),`,
             `${I1}GetPage = (page as number, pagingCookie as nullable text) as record =>`,
             `${I2}let`,
+            // FetchXml always starts with "<fetch" (serializeLines writes the root element first), so this adds attributes to it
             `${I3}PagedFetchXml = "<fetch page=""" & Text.From(page) & """ count=""" & Text.From(PageSize) & """"`,
             `${I4}& (if pagingCookie = null then "" else " paging-cookie=""" & XmlEncode(pagingCookie) & """")`,
             `${I4}& Text.Middle(FetchXml, 6),`,
@@ -325,9 +328,10 @@ export function generateFetchXmlQuery(model: QueryModel, outputs: OutputColumn[]
             `${I4}Query = [fetchXml = PagedFetchXml],`,
             `${I4}Headers = ${headersRecord(prefer, I4)}`,
             `${I3}])),`,
+            `${I3}// Without a pagingcookie attribute (some queries don't get one) the next page is requested by number alone`,
             `${I3}CookieXml = Record.FieldOrDefault(Response, ${mText("@" + PAGING_COOKIE)}, null),`,
-            `${I3}NextCookie = if CookieXml = null then null`,
-            `${I4}else UrlDecode(UrlDecode(Text.BetweenDelimiters(CookieXml, "pagingcookie=""", """")))`,
+            `${I3}RawCookie = if CookieXml = null then "" else Text.BetweenDelimiters(CookieXml, "pagingcookie=""", """"),`,
+            `${I3}NextCookie = if RawCookie = "" then null else UrlDecode(UrlDecode(RawCookie))`,
             `${I2}in`,
             `${I3}[`,
             `${I4}Records = Response[value],`,

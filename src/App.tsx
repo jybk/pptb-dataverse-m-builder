@@ -23,16 +23,20 @@ import { OutputPanel, type OutputTab, type PreviewState } from "./components/Out
 import { SettingsDialog } from "./components/SettingsDialog";
 import { TablePicker } from "./components/TablePicker";
 import { ViewMenu } from "./components/ViewMenu";
-import { copyText, hasToolbox, notify, saveText, useBuilderSettings, useConnection, useTheme, useToolboxEvents } from "./hooks/useToolbox";
+import { copyText, hasToolbox, notify, saveText, useBuilderSettings, useConnection, useDebouncedSave, useTheme, useToolboxEvents } from "./hooks/useToolbox";
 import { outputWarnings, resolveOutputColumns } from "./lib/columns";
 import { errorMessage, loadAttributes, loadOptions, loadTables, loadViews, runFetchPreview, runODataPreview, type ViewInfo } from "./lib/dataverse";
 import { buildQueryModel, buildTableFetchXml, fetchEntities, FetchXmlError, linesToXml, parseFetchXml, previewFetchXml, serializeLines } from "./lib/fetchxml";
 import { callerExpectsReply, otherTools } from "./lib/invocation";
-import { EMPTY_SESSION, parseSession, serializeSession, sessionKey } from "./lib/session";
+import { EMPTY_SESSION, MAX_FETCH_LENGTH, parseSession, serializeSession, sessionKey } from "./lib/session";
 import { choiceColumns, generateChoiceQuery, generateFetchXmlQuery, generateODataQuery, generateParameterQuery, normaliseUrl, odataSelect, type ChoiceQuery } from "./lib/mcode";
 import type { ChoiceOption } from "./lib/metadata";
 import { buildPreview } from "./lib/preview";
 import type { AttributeInfo, ColumnOverride, ColumnOverrides, OutputColumn, QueryModel, TableInfo } from "./lib/types";
+
+/** The left pane's width, in percent of the window. */
+const SPLIT_MIN = 30;
+const SPLIT_MAX = 75;
 
 const useStyles = makeStyles({
     root: { display: "flex", flexDirection: "column", height: "100vh", backgroundColor: tokens.colorNeutralBackground1, color: tokens.colorNeutralForeground1, overflow: "hidden" },
@@ -59,6 +63,7 @@ const useStyles = makeStyles({
         flexShrink: 0,
         backgroundColor: tokens.colorNeutralStroke2,
         ":hover": { backgroundColor: tokens.colorBrandStroke1 },
+        ":focus-visible": { backgroundColor: tokens.colorBrandStroke1, outline: `2px solid ${tokens.colorStrokeFocus2}` },
     },
     right: { flex: 1, minWidth: "360px", minHeight: 0, display: "flex", flexDirection: "column" },
     center: {
@@ -106,7 +111,14 @@ export default function App() {
     const [tablesError, setTablesError] = useState<string | null>(null);
     const [attrCache, setAttrCache] = useState<Map<string, AttributeInfo[]>>(new Map());
     const [attrFailed, setAttrFailed] = useState<Record<string, string>>({});
+    /** Tables whose date formats couldn't be read, so date-only columns can't be told apart. */
+    const [dateFormatsMissing, setDateFormatsMissing] = useState<Set<string>>(new Set());
     const inflight = useRef(new Set<string>());
+    /**
+     * Bumped whenever the metadata is reset (connection switch, reload). A load started before that
+     * belongs to the previous environment, so its result is dropped instead of landing in the new caches.
+     */
+    const metadataGeneration = useRef(0);
 
     const [mode, setMode] = useState<"table" | "fetchxml">("table");
     const [selectedTable, setSelectedTable] = useState<string | null>(null);
@@ -142,23 +154,30 @@ export default function App() {
 
     // ---------- loading ----------
     const reloadTables = useCallback(async () => {
+        const generation = metadataGeneration.current;
+        const current = () => generation === metadataGeneration.current;
         setTablesLoading(true);
         setTablesError(null);
         try {
-            setTables(await loadTables());
+            const loaded = await loadTables();
+            if (current()) setTables(loaded);
         } catch (err) {
-            setTablesError(errorMessage(err));
+            if (current()) setTablesError(errorMessage(err));
         } finally {
-            setTablesLoading(false);
+            if (current()) setTablesLoading(false);
         }
     }, []);
 
     const resetMetadata = useCallback(() => {
+        metadataGeneration.current += 1;
         setAttrCache(new Map());
         setAttrFailed({});
+        setDateFormatsMissing(new Set());
         inflight.current.clear();
         setViews({});
         setOptions(new Map());
+        setOptionsLoading(false);
+        setOptionsError(null);
         optionGroupsLoaded.current.clear();
         setPreview({ loading: false, error: null, result: null, ranAt: null });
     }, []);
@@ -167,17 +186,28 @@ export default function App() {
         resetMetadata();
         if (connection) void reloadTables();
         else setTables(null);
-    }, [connection?.id, connection?.url, reloadTables, resetMetadata]); // eslint-disable-line react-hooks/exhaustive-deps
+        // Only a different connection resets; a re-render with the same one doesn't
+    }, [connection?.id, connection?.url, reloadTables, resetMetadata]);
 
     const ensureAttributes = useCallback(
         (entities: string[]) => {
             for (const e of entities) {
                 if (!tablesByName.has(e) || attrCache.has(e) || attrFailed[e] || inflight.current.has(e)) continue;
                 inflight.current.add(e);
+                const generation = metadataGeneration.current;
+                const current = () => generation === metadataGeneration.current;
                 loadAttributes(e)
-                    .then((attrs) => setAttrCache((m) => new Map(m).set(e, attrs)))
-                    .catch((err) => setAttrFailed((f) => ({ ...f, [e]: errorMessage(err) })))
-                    .finally(() => inflight.current.delete(e));
+                    .then((loaded) => {
+                        if (!current()) return;
+                        setAttrCache((m) => new Map(m).set(e, loaded.attributes));
+                        if (loaded.dateFormatsMissing) setDateFormatsMissing((s) => new Set(s).add(e));
+                    })
+                    .catch((err) => {
+                        if (current()) setAttrFailed((f) => ({ ...f, [e]: errorMessage(err) }));
+                    })
+                    .finally(() => {
+                        if (current()) inflight.current.delete(e);
+                    });
             }
         },
         [tablesByName, attrCache, attrFailed],
@@ -250,15 +280,12 @@ export default function App() {
         };
     }, [envKey, launch]);
 
-    useEffect(() => {
-        if (!envKey || sessionFor !== envKey || !hasToolbox()) return;
-        const t = window.setTimeout(() => {
-            window.toolboxAPI.settings
-                .set(sessionKey(envKey), serializeSession({ mode, selectedTable, selection, fetchText, viewName, viewEdited, overridesByCtx }))
-                .catch((err: unknown) => console.warn("Couldn't save the session", err));
-        }, 800);
-        return () => window.clearTimeout(t);
-    }, [envKey, sessionFor, mode, selectedTable, selection, fetchText, viewName, viewEdited, overridesByCtx]);
+    const sessionValue = useMemo(
+        () => serializeSession({ mode, selectedTable, selection, fetchText, viewName, viewEdited, overridesByCtx }),
+        [mode, selectedTable, selection, fetchText, viewName, viewEdited, overridesByCtx],
+    );
+    // Saving starts once this environment's session is loaded, so it never overwrites it with another environment's work
+    useDebouncedSave(envKey && sessionFor === envKey ? sessionKey(envKey) : null, sessionValue, 800);
 
     // A remembered or prefilled table that this environment doesn't have (any more) would leave the column list loading forever
     useEffect(() => {
@@ -343,20 +370,31 @@ export default function App() {
             for (const e of entities?.all ?? []) {
                 if (attrFailed[e]) m.warnings.unshift(`Couldn't load the columns of ${e}: ${attrFailed[e]}`);
             }
+            const unsure = [...new Set(m.columns.filter((c) => c.attribute.kind === "datetime" && dateFormatsMissing.has(c.entity)).map((c) => c.entity))];
+            for (const e of unsure) {
+                m.warnings.unshift(
+                    `Couldn't read the date formats of ${tablesByName.get(e)?.displayName ?? e}, so its date-only columns are treated as date and time. Reload the metadata to try again.`,
+                );
+            }
             return { model: m, modelError: null };
         } catch (err) {
             return { model: null, modelError: errorMessage(err) };
         }
-    }, [parsed.doc, tables, metadataPending, tablesByName, attrCache, settings.pageSize, settings.includeRecordUrl, settings.activeOnly, mode, hasStatecode, entities, attrFailed, excludedKey]);
+    }, [parsed.doc, tables, metadataPending, tablesByName, attrCache, settings.pageSize, settings.includeRecordUrl, settings.activeOnly, mode, hasStatecode, entities, attrFailed, excludedKey, dateFormatsMissing]);
 
-    const outputs = useMemo<OutputColumn[]>(() => (model ? resolveOutputColumns(model.columns, settings, overrides) : []), [model, settings, overrides]);
+    const outputs = useMemo<OutputColumn[]>(() => (model ? resolveOutputColumns(model.columns, settings, overrides, !!model.recordUrlKey) : []), [model, settings, overrides]);
     const outputsByCol = useMemo(() => {
         const m = new Map<string, OutputColumn[]>();
         for (const o of outputs) m.set(o.colId, [...(m.get(o.colId) ?? []), o]);
         return m;
     }, [outputs]);
 
-    const warnings = useMemo(() => (model ? [...model.warnings, ...outputWarnings(model.columns, outputs)] : []), [model, outputs]);
+    const tooLargeToRemember = mode === "fetchxml" && fetchText.length > MAX_FETCH_LENGTH;
+    const warnings = useMemo(() => {
+        if (!model) return [];
+        const extra = tooLargeToRemember ? [`This FetchXML is over ${MAX_FETCH_LENGTH.toLocaleString("en-US")} characters, so it isn't remembered when you close the tool. Save the M or the FetchXML to keep it.`] : [];
+        return [...model.warnings, ...outputWarnings(model.columns, outputs), ...extra];
+    }, [model, outputs, tooLargeToRemember]);
 
     const useOData = settings.queryStyle === "odata" && !!model?.odata;
     const mCode = useMemo(() => {
@@ -381,24 +419,28 @@ export default function App() {
             if (!optionGroupsLoaded.current.has(key)) groups.set(key, { entity: s.entity, kind: s.attribute.kind });
         }
         if (groups.size === 0) return;
+        const generation = metadataGeneration.current;
         setOptionsLoading(true);
         setOptionsError(null);
-        Promise.all(
-            Array.from(groups.entries()).map(async ([key, g]) => {
-                const res = await loadOptions(g.entity, g.kind);
-                optionGroupsLoaded.current.add(key);
-                return { entity: g.entity, res };
-            }),
-        )
-            .then((all) =>
-                setOptions((prev) => {
-                    const next = new Map(prev);
-                    for (const { entity, res } of all) for (const [attr, opts] of res) next.set(`${entity}.${attr}`, opts);
-                    return next;
-                }),
-            )
-            .catch((err) => setOptionsError(`Couldn't read the choice values, so live queries are shown instead: ${errorMessage(err)}`))
-            .finally(() => setOptionsLoading(false));
+        const entries = Array.from(groups.entries());
+        void Promise.allSettled(entries.map(([, g]) => loadOptions(g.entity, g.kind))).then((results) => {
+            if (generation !== metadataGeneration.current) return;
+            const failures: string[] = [];
+            const loaded: Array<[string, ChoiceOption[]]> = [];
+            results.forEach((r, i) => {
+                const [key, g] = entries[i];
+                if (r.status === "fulfilled") {
+                    // Only a group that actually loaded counts as loaded; a failed one is tried again next time
+                    optionGroupsLoaded.current.add(key);
+                    for (const [attr, opts] of r.value) loaded.push([`${g.entity}.${attr}`, opts]);
+                } else if (!failures.includes(errorMessage(r.reason))) {
+                    failures.push(errorMessage(r.reason));
+                }
+            });
+            setOptions((prev) => new Map([...prev, ...loaded]));
+            if (failures.length > 0) setOptionsError(`Couldn't read some choice values, so live queries are shown for those: ${failures.join("; ")}`);
+            setOptionsLoading(false);
+        });
     }, [settings.choiceTables, tab, choiceSpecs]);
 
     const choiceQueries = useMemo<ChoiceQuery[]>(
@@ -529,12 +571,14 @@ export default function App() {
     const runPreview = useCallback(
         async (rows: number) => {
             if (!model) return;
+            const generation = metadataGeneration.current;
             setPreview({ loading: true, error: null, result: null, ranAt: null });
             try {
                 const records =
                     useOData && model.odata
                         ? await runODataPreview(model.table.entitySetName, odataSelect(model, outputs), model.odata.filter, rows)
                         : await runFetchPreview(model.table.entitySetName, previewFetchXml(model, rows));
+                if (generation !== metadataGeneration.current) return;
                 setPreview({
                     loading: false,
                     error: null,
@@ -543,7 +587,7 @@ export default function App() {
                     ranFor: mCode,
                 });
             } catch (err) {
-                setPreview({ loading: false, error: errorMessage(err), result: null, ranAt: null });
+                if (generation === metadataGeneration.current) setPreview({ loading: false, error: errorMessage(err), result: null, ranAt: null });
             }
         },
         [model, outputs, settings, connectionUrl, useOData, mCode],
@@ -553,26 +597,39 @@ export default function App() {
         const current = selectedTable ? views[selectedTable] : undefined;
         // Opening the menu again after a failure tries once more
         if (!selectedTable || (current && current !== "error")) return;
+        const generation = metadataGeneration.current;
+        const set = (value: ViewInfo[] | "error") => {
+            if (generation === metadataGeneration.current) setViews((v) => ({ ...v, [selectedTable]: value }));
+        };
         setViews((v) => ({ ...v, [selectedTable]: "loading" }));
-        loadViews(selectedTable)
-            .then((list) => setViews((v) => ({ ...v, [selectedTable]: list })))
-            .catch(() => setViews((v) => ({ ...v, [selectedTable]: "error" })));
+        loadViews(selectedTable).then(set, () => set("error"));
     }, [selectedTable, views]);
 
     // ---------- splitter ----------
+    const clampSplit = (percent: number) => Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, percent));
+    const stopDrag = useRef<(() => void) | null>(null);
+    useEffect(() => () => stopDrag.current?.(), []);
     const startDrag = (e: React.PointerEvent) => {
         e.preventDefault();
         const move = (ev: PointerEvent) => {
             const rect = mainRef.current?.getBoundingClientRect();
             if (!rect) return;
-            setLeftPercent(Math.min(75, Math.max(30, ((ev.clientX - rect.left) / rect.width) * 100)));
+            setLeftPercent(clampSplit(((ev.clientX - rect.left) / rect.width) * 100));
         };
         const up = () => {
             window.removeEventListener("pointermove", move);
             window.removeEventListener("pointerup", up);
+            stopDrag.current = null;
         };
         window.addEventListener("pointermove", move);
         window.addEventListener("pointerup", up);
+        stopDrag.current = up;
+    };
+    const splitKey = (e: React.KeyboardEvent) => {
+        const next = { ArrowLeft: leftPercent - 2, ArrowRight: leftPercent + 2, Home: SPLIT_MIN, End: SPLIT_MAX }[e.key];
+        if (next === undefined) return;
+        e.preventDefault();
+        setLeftPercent(clampSplit(next));
     };
 
     // ---------- grid rows ----------
@@ -726,7 +783,18 @@ export default function App() {
                         </div>
                     )}
                 </div>
-                <div className={styles.splitter} onPointerDown={startDrag} role="separator" aria-orientation="vertical" aria-label="Resize panes" />
+                <div
+                    className={styles.splitter}
+                    onPointerDown={startDrag}
+                    onKeyDown={splitKey}
+                    tabIndex={0}
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="Resize panes"
+                    aria-valuenow={Math.round(leftPercent)}
+                    aria-valuemin={SPLIT_MIN}
+                    aria-valuemax={SPLIT_MAX}
+                />
                 <div className={styles.right}>
                     <OutputPanel
                         tab={tab}

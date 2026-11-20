@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.1
+
+Fixes from a code review.
+
+- **Table-name columns** (EntityName, such as `objecttypecode` on notes) now come out as the table's logical name. They used to default to a label, which Dataverse doesn't send for this column type, so the column was empty.
+- **Date formats that can't be read are reported.** If Dataverse doesn't return a table's date formats, its date-only columns can't be told apart from date-and-time columns; the builder now says so instead of converting them silently.
+- `<all-attributes />` on a table whose columns couldn't be loaded gets a clear warning that it's left out.
+- **Switching environments mid-load** no longer lets results from the previous environment (columns, views, choice values, preview) land in the new one.
+- **Choice values:** when one table's values fail to load, the others are still used, and the failed one is tried again next time.
+- **Paging:** a paging cookie without a `pagingcookie` value is treated as no cookie, so the next page is requested by number. A fractional `count` is rounded down.
+- **Unticked columns:** a linked column that a distinct query sorts on through the main table (`<order entityname="alias">`) is kept in the request.
+- **Saving:** settings and your remembered work are written when the tool closes or you switch environment, instead of being lost if that happens within a second of the last change. A FetchXML too large to remember now says so.
+- Smaller: the record-link app id is URL-encoded; "Record URL" is only reserved as a column name when the query has a Record URL; the table, column and view searches all match the same way (any order, ignoring accents); the pane splitter works with the keyboard.
+
 ## 1.3.0
 
 - **The FetchXML editor collapses.** In FetchXML mode the editor folds down to its title bar once a query is loaded, which leaves the room to the column list. Click _FetchXML_ to open or close it. It opens by itself when it's empty, when you type in it, and when the XML has an error.

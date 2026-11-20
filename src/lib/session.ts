@@ -17,7 +17,8 @@ export interface Session {
 export const EMPTY_SESSION: Session = { mode: "table", selectedTable: null, selection: {}, fetchText: "", viewName: null, viewEdited: false, overridesByCtx: {} };
 
 const VERSION = 1;
-const MAX_FETCH_LENGTH = 200_000;
+/** Longer FetchXML isn't stored with the session; the builder says so. */
+export const MAX_FETCH_LENGTH = 200_000;
 
 export function sessionKey(environmentUrl: string): string {
     return `session:${environmentUrl.toLowerCase()}`;

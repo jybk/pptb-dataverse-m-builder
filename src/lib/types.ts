@@ -155,6 +155,7 @@ export interface QueryModel {
     /** Primary key JSON key, when a record URL can be built. */
     recordUrlKey: string | null;
     /** Only for queries built from the table picker: OData equivalent. */
-    odata: { select: string[]; filter: string | null } | null;
+    /** Set when the query can also be written in OData; the $select comes from the output columns (odataSelect). */
+    odata: { filter: string | null } | null;
     warnings: string[];
 }

@@ -1,8 +1,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DebouncedSaver } from "../lib/saver";
 import { detectTimeZone } from "../lib/timezone";
 import { DEFAULT_SETTINGS, type BuilderSettings } from "../lib/types";
 
 type Connection = ToolBoxAPI.Connection;
+
+/**
+ * Saves `value` under `key` with the ToolBox settings API shortly after it last changed. A save still
+ * waiting is written when the tool is hidden or closed, and when `key` changes or becomes null
+ * (for example while another environment's session loads).
+ */
+export function useDebouncedSave(key: string | null, value: unknown, delay: number) {
+    const saver = useMemo(() => new DebouncedSaver((k, v) => window.toolboxAPI.settings.set(k, v), delay), [delay]);
+
+    useEffect(() => {
+        if (key && hasToolbox()) saver.schedule(key, value);
+        else saver.flush();
+    }, [saver, key, value]);
+
+    useEffect(() => {
+        const flush = () => saver.flush();
+        const onVisibility = () => {
+            if (document.visibilityState === "hidden") saver.flush();
+        };
+        window.addEventListener("pagehide", flush);
+        document.addEventListener("visibilitychange", onVisibility);
+        return () => {
+            window.removeEventListener("pagehide", flush);
+            document.removeEventListener("visibilitychange", onVisibility);
+            saver.flush();
+        };
+    }, [saver]);
+}
 
 export function hasToolbox(): boolean {
     return typeof window !== "undefined" && !!window.toolboxAPI && !!window.dataverseAPI;
@@ -123,13 +152,7 @@ export function useBuilderSettings(environment: string | null) {
         })();
     }, []);
 
-    useEffect(() => {
-        if (!loaded.current || !hasToolbox()) return;
-        const t = window.setTimeout(() => {
-            window.toolboxAPI.settings.set(SETTINGS_KEY, stored).catch((err: unknown) => console.warn("Couldn't save settings", err));
-        }, 400);
-        return () => window.clearTimeout(t);
-    }, [stored]);
+    useDebouncedSave(loaded.current ? SETTINGS_KEY : null, stored, 400);
 
     // Pin a pre-existing global app id to the first environment seen, so it stops following the user to other environments
     useEffect(() => {

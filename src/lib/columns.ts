@@ -123,7 +123,11 @@ export function recordUrlColumnName(naming: NamingMode): string {
  * Expand the query's columns into the columns of the final table, applying the user's
  * output modes and names, and making every name unique.
  */
-export function resolveOutputColumns(specs: ColumnSpec[], settings: BuilderSettings, overrides: ColumnOverrides): OutputColumn[] {
+/**
+ * `hasRecordUrl` says whether the query actually gets a Record URL column; the setting alone isn't
+ * enough, because aggregate and distinct queries go without one.
+ */
+export function resolveOutputColumns(specs: ColumnSpec[], settings: BuilderSettings, overrides: ColumnOverrides, hasRecordUrl = settings.includeRecordUrl): OutputColumn[] {
     const out: OutputColumn[] = [];
     const naming = settings.naming;
     for (const spec of specs) {
@@ -156,7 +160,7 @@ export function resolveOutputColumns(specs: ColumnSpec[], settings: BuilderSetti
 
     // Make names unique (Power Query is case-sensitive, but Power BI's model isn't)
     const taken = new Set<string>();
-    const reserved = settings.includeRecordUrl ? recordUrlColumnName(naming).toLowerCase() : null;
+    const reserved = hasRecordUrl ? recordUrlColumnName(naming).toLowerCase() : null;
     if (reserved) taken.add(reserved);
     for (const col of out) {
         let name = col.name;

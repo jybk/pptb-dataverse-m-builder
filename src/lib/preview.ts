@@ -37,7 +37,7 @@ export function buildPreview(model: QueryModel, outputs: OutputColumn[], records
     const columns = outputs.map((o) => o.name);
     const urlName = model.recordUrlKey ? recordUrlColumnName(settings.naming) : null;
     if (urlName) columns.push(urlName);
-    const base = `${normaliseUrl(connectionUrl)}/main.aspx?${settings.appId.trim() ? `appid=${settings.appId.trim()}&` : ""}pagetype=entityrecord&etn=${model.table.logicalName}&id=`;
+    const base = `${normaliseUrl(connectionUrl)}/main.aspx?${settings.appId.trim() ? `appid=${encodeURIComponent(settings.appId.trim())}&` : ""}pagetype=entityrecord&etn=${model.table.logicalName}&id=`;
 
     const rows = records.map((r) => {
         const row = outputs.map((o) => convertValue(o, r[o.sourceKey], settings));
