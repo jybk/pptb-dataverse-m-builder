@@ -10,6 +10,7 @@ const session: Session = {
     fetchText: '<fetch><entity name="account" /></fetch>',
     viewName: "Active Accounts",
     viewEdited: true,
+    queryNames: { "table:account": "Klanten" },
     overridesByCtx: { "table:account": { "|name": { name: "Customer" }, "|statecode": { mode: "value", hidden: true } } },
 };
 
@@ -37,6 +38,7 @@ describe("remembered session", () => {
             fetchText: { not: "text" },
             viewName: 7,
             viewEdited: "yes",
+            queryNames: { "table:account": "Klanten", "table:contact": "  ", broken: 3 },
             overridesByCtx: { "table:account": { "|name": { name: "", mode: 3, hidden: "yes" }, "|revenue": { name: "Omzet" } }, broken: 1 },
         });
         expect(parsed).toEqual({
@@ -46,13 +48,14 @@ describe("remembered session", () => {
             fetchText: "",
             viewName: null,
             viewEdited: false,
+            queryNames: { "table:account": "Klanten" },
             overridesByCtx: { "table:account": { "|revenue": { name: "Omzet" } } },
         });
     });
 
     it("reads a session saved before view names were remembered", () => {
-        const { viewName: _name, viewEdited: _edited, ...older } = session;
-        expect(parseSession(JSON.parse(JSON.stringify({ v: 1, ...older })))).toEqual({ ...session, viewName: null, viewEdited: false });
+        const { viewName: _name, viewEdited: _edited, queryNames: _names, ...older } = session;
+        expect(parseSession(JSON.parse(JSON.stringify({ v: 1, ...older })))).toEqual({ ...session, viewName: null, viewEdited: false, queryNames: {} });
     });
 
     it("doesn't store an enormous pasted query", () => {

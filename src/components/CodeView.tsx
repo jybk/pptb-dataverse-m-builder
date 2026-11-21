@@ -73,11 +73,19 @@ function tokenizeXml(code: string): Token[] {
     return out;
 }
 
-export function CodeView({ code, language = "m" }: { code: string; language?: "m" | "xml" }) {
+export function CodeView({ code, language = "m" }: { code: string; language?: "m" | "xml" | "tmdl" }) {
     const styles = useStyles();
-    const tokens = useMemo(() => (code.length > 200_000 ? [{ cls: null, text: code } as Token] : language === "xml" ? tokenizeXml(code) : tokenizeM(code)), [code, language]);
+    const tokens = useMemo(
+        () =>
+            code.length > 200_000 || language === "tmdl"
+                ? [{ cls: null, text: code } as Token]
+                : language === "xml"
+                  ? tokenizeXml(code)
+                  : tokenizeM(code),
+        [code, language],
+    );
     return (
-        <pre className={styles.pre} tabIndex={0} aria-label={language === "xml" ? "FetchXML" : "Power Query M code"}>
+        <pre className={styles.pre} tabIndex={0} aria-label={language === "xml" ? "FetchXML" : language === "tmdl" ? "TMDL script" : "Power Query M code"}>
             {tokens.map((t, i) =>
                 t.cls ? (
                     <span key={i} className={styles[t.cls]}>

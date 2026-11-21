@@ -11,8 +11,6 @@ import {
     MessageBar,
     MessageBarBody,
     MessageBarTitle,
-    Radio,
-    RadioGroup,
     Select,
     Spinner,
     Switch,
@@ -22,13 +20,14 @@ import {
     ToggleButton,
     Tooltip,
 } from "@fluentui/react-components";
-import { ArrowReply16Regular, Copy16Regular, Edit16Regular, Play16Regular, Save16Regular } from "@fluentui/react-icons";
+import { ArrowReply16Regular, Copy16Regular, DocumentTable16Regular, Edit16Regular, Play16Regular, Save16Regular } from "@fluentui/react-icons";
 import { useState, type ReactNode } from "react";
-import type { ChoiceQuery } from "../lib/mcode";
+import type { DataModel, ModelNote } from "../lib/model";
 import type { PreviewResult } from "../lib/preview";
 import { DAYLIGHT_SAVING_LABELS, offsetLabel } from "../lib/timezone";
 import type { BuilderSettings, QueryModel } from "../lib/types";
 import { CodeView } from "./CodeView";
+import { ModelTab } from "./ModelTab";
 
 const useStyles = makeStyles({
     root: { display: "flex", flexDirection: "column", minHeight: 0, height: "100%", minWidth: 0 },
@@ -58,7 +57,7 @@ const useStyles = makeStyles({
     codeBox: { display: "flex", flexDirection: "column", maxHeight: "420px", minHeight: "120px" },
 });
 
-export type OutputTab = "m" | "choices" | "parameter" | "fetchxml" | "preview";
+export type OutputTab = "m" | "model" | "parameter" | "fetchxml" | "preview";
 
 export interface PreviewState {
     loading: boolean;
@@ -87,7 +86,12 @@ export function OutputPanel(props: {
     settings: BuilderSettings;
     updateSettings: (patch: Partial<BuilderSettings>) => void;
     parameterCode: string;
-    choiceQueries: ChoiceQuery[];
+    /** The tables that go with the main query and their relationships. */
+    dataModel: DataModel | null;
+    mainNameInput: string;
+    suggestedMainName: string;
+    onMainName: (name: string) => void;
+    onFix: (fix: NonNullable<ModelNote["fix"]>) => void;
     choiceLoading: boolean;
     choiceError: string | null;
     onEditAsFetchXml: () => void;
@@ -97,6 +101,12 @@ export function OutputPanel(props: {
     onReturn: () => void;
     onCopy: (text: string, what: string) => void;
     onSave: (defaultName: string, text: string) => void;
+    /** Whether there's a query to export, and no export running. */
+    canExport: boolean;
+    exporting: "project" | "template" | "workbook" | null;
+    onSaveWorkbook: () => void;
+    onSaveProject: () => void;
+    onSaveTemplate: () => void;
     queryName: string;
     emptyHint: ReactNode;
 }) {
@@ -108,7 +118,7 @@ export function OutputPanel(props: {
     const tabs = (
         <TabList className={styles.tabs} size="small" selectedValue={props.tab} onTabSelect={(_, d) => props.onTab(d.value as OutputTab)}>
             <Tab value="m">Power Query (M)</Tab>
-            <Tab value="choices">Choice tables{props.choiceQueries.length ? ` (${props.choiceQueries.length})` : ""}</Tab>
+            <Tab value="model">Model{props.dataModel?.queries.length ? ` (${props.dataModel.queries.length})` : ""}</Tab>
             <Tab value="parameter">Parameter</Tab>
             <Tab value="fetchxml">FetchXML</Tab>
             <Tab value="preview">Preview</Tab>
@@ -250,6 +260,11 @@ export function OutputPanel(props: {
                         <Button size="small" icon={<Save16Regular />} disabled={!props.mCode} onClick={() => props.onSave(`${props.queryName}.pq`, props.mCode ?? "")}>
                             Save .pq
                         </Button>
+                        <Tooltip content="An Excel workbook with this query, loaded to a table and refreshed when it opens" relationship="description">
+                            <Button size="small" icon={<DocumentTable16Regular />} disabled={!props.canExport} onClick={props.onSaveWorkbook}>
+                                {props.exporting === "workbook" ? "Saving…" : "Save .xlsx"}
+                            </Button>
+                        </Tooltip>
                         {props.canReturn && (
                             <Tooltip content="Returns this M query and its FetchXML to the tool that opened this one, and closes this tab" relationship="description">
                                 <Button size="small" icon={<ArrowReply16Regular />} onClick={props.onReturn}>
@@ -286,7 +301,9 @@ export function OutputPanel(props: {
                                         For scheduled refresh, set the same OAuth2 credential on the data source in the Power BI service; if its connection test fails, tick{" "}
                                         <b>Skip test connection</b>.
                                     </li>
-                                    <li>Rename the query, then add the choice tables if you want to relate labels to values.</li>
+                                    <li>
+                                        Name the query <b>{props.queryName}</b>. The <b>Model</b> tab has the tables that go with it and the relationships between them.
+                                    </li>
                                 </ol>
                             </AccordionPanel>
                         </AccordionItem>
@@ -294,57 +311,25 @@ export function OutputPanel(props: {
                 </div>
             )}
 
-            {props.tab === "choices" && (
-                <div className={styles.scrollBody}>
-                    <div className={styles.options}>
-                        <RadioGroup layout="horizontal" value={settings.choiceTables} onChange={(_, d) => props.updateSettings({ choiceTables: d.value as "live" | "static" })}>
-                            <Radio value="live" label="Live (read from metadata on refresh)" />
-                            <Radio value="static" label="Static (values embedded now)" />
-                        </RadioGroup>
-                        <span style={{ flex: 1 }} />
-                        <Button
-                            size="small"
-                            icon={<Copy16Regular />}
-                            disabled={props.choiceQueries.length === 0}
-                            onClick={() => props.onCopy(props.choiceQueries.map((q) => q.code).join("\n\n"), "All choice queries")}
-                        >
-                            Copy all
-                        </Button>
-                    </div>
-                    <Body1>
-                        One query per choice, status or yes/no column, with a Value and Label column. Set the column to <b>Value</b> (or <b>Label + value</b>) on the left to relate
-                        it to these tables in your model.
-                    </Body1>
-                    {props.choiceLoading && <Spinner size="small" label="Reading choice values…" />}
-                    {props.choiceError && (
-                        <MessageBar intent="error">
-                            <MessageBarBody>{props.choiceError}</MessageBarBody>
-                        </MessageBar>
-                    )}
-                    {props.choiceQueries.length === 0 && !props.choiceLoading && <div className={styles.center}>The query has no choice, status or yes/no columns.</div>}
-                    <Accordion multiple collapsible>
-                        {props.choiceQueries.map((q) => (
-                            <AccordionItem key={q.id} value={q.id}>
-                                <AccordionHeader size="small">
-                                    {q.queryName} <Caption1 style={{ marginLeft: 8 }}>{`${q.entity}.${q.attribute}`}</Caption1>
-                                </AccordionHeader>
-                                <AccordionPanel>
-                                    <div className={styles.actions} style={{ marginBottom: 6 }}>
-                                        <Button size="small" icon={<Copy16Regular />} onClick={() => props.onCopy(q.code, q.queryName)}>
-                                            Copy
-                                        </Button>
-                                        <Button size="small" icon={<Save16Regular />} onClick={() => props.onSave(`${q.queryName}.pq`, q.code)}>
-                                            Save .pq
-                                        </Button>
-                                    </div>
-                                    <div className={styles.codeBox}>
-                                        <CodeView code={q.code} />
-                                    </div>
-                                </AccordionPanel>
-                            </AccordionItem>
-                        ))}
-                    </Accordion>
-                </div>
+            {props.tab === "model" && (
+                <ModelTab
+                    data={props.dataModel}
+                    mainNameInput={props.mainNameInput}
+                    suggestedMainName={props.suggestedMainName}
+                    onMainName={props.onMainName}
+                    settings={settings}
+                    updateSettings={props.updateSettings}
+                    choiceLoading={props.choiceLoading}
+                    choiceError={props.choiceError}
+                    onFix={props.onFix}
+                    onCopy={props.onCopy}
+                    onSave={props.onSave}
+                    canExport={props.canExport}
+                    exporting={props.exporting}
+                    onSaveWorkbook={props.onSaveWorkbook}
+                    onSaveProject={props.onSaveProject}
+                    onSaveTemplate={props.onSaveTemplate}
+                />
             )}
 
             {props.tab === "parameter" && (

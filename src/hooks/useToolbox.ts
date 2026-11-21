@@ -216,3 +216,50 @@ export async function saveText(defaultName: string, text: string) {
         await notify("Couldn't save the file", err instanceof Error ? err.message : String(err), "error");
     }
 }
+
+/** Saves bytes (a workbook, say) through ToolBox's save dialog, which writes them as they are. */
+export async function saveBytes(defaultName: string, bytes: Uint8Array, filters: Array<{ name: string; extensions: string[] }>) {
+    try {
+        const path = await window.toolboxAPI.fileSystem.saveFile(defaultName, bytes, filters);
+        if (path) await notify("Saved", path, "success");
+    } catch (err) {
+        await notify("Couldn't save the file", err instanceof Error ? err.message : String(err), "error");
+    }
+}
+
+async function exists(path: string): Promise<boolean> {
+    try {
+        await window.toolboxAPI.fileSystem.stat(path);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Writes a project's files into a new folder inside the one the user picks, "Name (2)" if Name is taken,
+ * so nothing that's there is overwritten. Picking the folder gives the tool access to write inside it.
+ */
+export async function saveProjectFolder(project: { name: string; files: Array<{ path: string; content: string }> }, what: string, open: string) {
+    try {
+        const parent = await window.toolboxAPI.fileSystem.selectPath({ type: "folder", title: `Choose where to save the ${what}`, buttonLabel: "Save here" });
+        if (!parent) return;
+        const sep = parent.includes("\\") && !parent.includes("/") ? "\\" : "/";
+        const base = parent.replace(/[\\/]+$/, "") + sep + project.name;
+        let folder = base;
+        for (let n = 2; await exists(folder); n++) folder = `${base} (${n})`;
+        const made = new Set<string>();
+        for (const file of project.files) {
+            const path = folder + sep + file.path.split("/").join(sep);
+            const dir = path.slice(0, path.lastIndexOf(sep));
+            if (!made.has(dir)) {
+                await window.toolboxAPI.fileSystem.createDirectory(dir);
+                made.add(dir);
+            }
+            await window.toolboxAPI.fileSystem.writeText(path, file.content);
+        }
+        await notify("Saved", `Open ${open} in ${folder}`, "success");
+    } catch (err) {
+        await notify(`Couldn't save the ${what}`, err instanceof Error ? err.message : String(err), "error");
+    }
+}

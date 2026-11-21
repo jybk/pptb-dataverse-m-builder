@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.4.0
+
+- **Save as a Power BI project.** The Model tab saves the main query and every query that goes with it as a Power BI project (.pbip): tables with their columns and types, the URL parameter, the relationships and an empty report page. Open it in Power BI Desktop and refresh. Bridge tables and lookup keys are hidden, Record URLs are marked as links, and numbers that make sense to add up are summed by default. Exporting again gives the same files, so the project diffs cleanly in Git.
+- **Save as a Power BI template.** The same model as a .pbit, which every Power BI Desktop opens without preview features, the Report Server edition included. Opening it asks for the URL parameter and loads the data into a new report.
+- **Save as an Excel workbook.** _Save .xlsx_ makes a workbook with the main query, loaded to a table and refreshed when it opens. It uses Microsoft's connected-workbooks library.
+- **Model tab.** It replaces the Choice tables tab and holds everything that goes with the main query: its choice tables, the new bridge and lookup tables, and the relationships between them.
+- **Bridge tables for multi-select columns.** Dataverse returns the selected choices as one text ("1,3"); the bridge has one row per record and choice, so a report can filter and count by each choice. It makes its own small request (primary key and the column, under the main query's filters) and relates to the main query in both directions.
+- **Lookup tables.** One query per table the lookup columns point to, with key and primary name, reading every row so records that point to an inactive row still find it. Owner combines users and teams, and Customer accounts and contacts, with a type column. Lookups to the same table share it: the first relationship is active, the others inactive for `USERELATIONSHIP`, with Owner first. A lookup to the main table itself (Parent Account) gets its own table. A switch turns lookup tables off.
+- **Relationships as a TMDL script.** Paste it into Power BI Desktop's TMDL view to create all relationships at once; applying it again replaces them. The same relationships are listed for Excel's data model or for creating them by hand. Where two columns relate the same two tables, the second relationship is inactive.
+- **Quick fixes.** When a choice column only returns its label, a lookup only its name, or the bridge needs the primary key, the Model tab says so and offers a button that changes the main query.
+- Bridge and lookup table columns are named after their table (_Owner key_, _Account Tags bridge value_), so Power BI's relationship autodetect can't pair them with other columns. The how-to on the Model tab suggests turning autodetect off for the file anyway.
+- The main query's name, which the relationships use, is remembered per table.
+- The FetchXML title bar no longer repeats the view's name: the column list's title already shows it.
+
 ## 1.3.1
 
 Fixes from a code review.

@@ -3,7 +3,7 @@ import type { AttributeInfo, TableInfo } from "../src/lib/types";
 
 const label = (text: string) => ({ UserLocalizedLabel: { Label: text }, LocalizedLabels: [{ Label: text, LanguageCode: 1033 }] });
 
-const attr = (logical: string, display: string, typeName: string, extra: Record<string, unknown> = {}) => ({
+export const attr = (logical: string, display: string, typeName: string, extra: Record<string, unknown> = {}) => ({
     LogicalName: logical,
     SchemaName: logical.replace(/(^|_)([a-z])/g, (_m, p, c) => p + c.toUpperCase()),
     DisplayName: label(display),

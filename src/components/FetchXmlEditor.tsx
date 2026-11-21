@@ -1,6 +1,5 @@
 import {
     Button,
-    Caption1,
     makeStyles,
     Menu,
     MenuItem,
@@ -30,7 +29,6 @@ const useStyles = makeStyles({
     bar: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalXS, flexWrap: "wrap" },
     // The whole title is the expand/collapse button
     toggle: { minWidth: 0, paddingLeft: tokens.spacingHorizontalXS, fontSize: tokens.fontSizeBase400, fontWeight: tokens.fontWeightSemibold },
-    summary: { color: tokens.colorNeutralForeground3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 },
     area: { flex: 1, minHeight: 0, display: "flex" },
     textarea: {
         flex: 1,
@@ -57,8 +55,6 @@ export function FetchXmlEditor(props: {
     /** Whether the editor is shown; collapsed, only the title bar remains. */
     expanded: boolean;
     onToggle: () => void;
-    /** What the query is, shown next to the title (the view's name, or the table). */
-    summary?: string;
     extra?: ReactNode;
 }) {
     const styles = useStyles();
@@ -77,11 +73,6 @@ export function FetchXmlEditor(props: {
                 >
                     FetchXML
                 </Button>
-                {props.summary && (
-                    <Caption1 className={styles.summary} title={props.summary}>
-                        {props.summary}
-                    </Caption1>
-                )}
                 <span style={{ flex: 1 }} />
                 {props.extra}
                 <Tooltip content="Open a .xml file" relationship="label">

@@ -10,11 +10,13 @@ export interface Session {
     /** The view the FetchXML was loaded from, if any, and whether it has been changed since. */
     viewName: string | null;
     viewEdited: boolean;
+    /** The main query's name in the model, per table or FetchXML root table, when it differs from the suggestion. */
+    queryNames: Record<string, string>;
     /** Column names and output modes, per table or FetchXML root table. */
     overridesByCtx: Record<string, ColumnOverrides>;
 }
 
-export const EMPTY_SESSION: Session = { mode: "table", selectedTable: null, selection: {}, fetchText: "", viewName: null, viewEdited: false, overridesByCtx: {} };
+export const EMPTY_SESSION: Session = { mode: "table", selectedTable: null, selection: {}, fetchText: "", viewName: null, viewEdited: false, queryNames: {}, overridesByCtx: {} };
 
 const VERSION = 1;
 /** Longer FetchXML isn't stored with the session; the builder says so. */
@@ -69,6 +71,9 @@ export function parseSession(raw: unknown): Session | null {
         fetchText: typeof raw.fetchText === "string" ? raw.fetchText : "",
         viewName: typeof raw.viewName === "string" && raw.viewName ? raw.viewName : null,
         viewEdited: raw.viewEdited === true,
+        queryNames: isRecord(raw.queryNames)
+            ? Object.fromEntries(Object.entries(raw.queryNames).filter((e): e is [string, string] => typeof e[1] === "string" && e[1].trim() !== ""))
+            : {},
         overridesByCtx,
     };
 }

@@ -23,11 +23,15 @@ import { OutputPanel, type OutputTab, type PreviewState } from "./components/Out
 import { SettingsDialog } from "./components/SettingsDialog";
 import { TablePicker } from "./components/TablePicker";
 import { ViewMenu } from "./components/ViewMenu";
-import { copyText, hasToolbox, notify, saveText, useBuilderSettings, useConnection, useDebouncedSave, useTheme, useToolboxEvents } from "./hooks/useToolbox";
+import { copyText, hasToolbox, notify, saveBytes, saveProjectFolder, saveText, useBuilderSettings, useConnection, useDebouncedSave, useTheme, useToolboxEvents } from "./hooks/useToolbox";
 import { outputWarnings, resolveOutputColumns } from "./lib/columns";
 import { errorMessage, loadAttributes, loadOptions, loadTables, loadViews, runFetchPreview, runODataPreview, type ViewInfo } from "./lib/dataverse";
-import { buildQueryModel, buildTableFetchXml, fetchEntities, FetchXmlError, linesToXml, parseFetchXml, previewFetchXml, serializeLines } from "./lib/fetchxml";
+import { buildQueryModel, buildTableFetchXml, fetchEntities, FetchXmlError, linesToXml, parseFetchXml, previewFetchXml, serializeLines, type ModelInput } from "./lib/fetchxml";
 import { callerExpectsReply, otherTools } from "./lib/invocation";
+import { buildDataModel, suggestedMainName, type DataModel } from "./lib/model";
+import { buildPowerBiTemplate } from "./lib/pbit";
+import { buildPowerBiProject, fileSafeName, type PowerBiProjectInput } from "./lib/pbip";
+import { buildWorkbook } from "./lib/xlsx";
 import { EMPTY_SESSION, MAX_FETCH_LENGTH, parseSession, serializeSession, sessionKey } from "./lib/session";
 import { choiceColumns, generateChoiceQuery, generateFetchXmlQuery, generateODataQuery, generateParameterQuery, normaliseUrl, odataSelect, type ChoiceQuery } from "./lib/mcode";
 import type { ChoiceOption } from "./lib/metadata";
@@ -131,6 +135,8 @@ export default function App() {
     /** The FetchXML editor is collapsed once a query is loaded; it opens by itself when it's empty or has an error. */
     const [editorOpen, setEditorOpen] = useState(false);
     const [overridesByCtx, setOverridesByCtx] = useState<Record<string, ColumnOverrides>>({});
+    /** The main query's name in the model, as typed, per table or FetchXML root table. */
+    const [queryNames, setQueryNames] = useState<Record<string, string>>({});
     const [tab, setTab] = useState<OutputTab>("m");
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [views, setViews] = useState<Record<string, ViewInfo[] | "loading" | "error">>({});
@@ -266,6 +272,7 @@ export default function App() {
                     setViewEdited(saved.viewEdited);
                     setEditorOpen(false);
                     setOverridesByCtx(saved.overridesByCtx);
+                    setQueryNames(saved.queryNames);
                     setPreview({ loading: false, error: null, result: null, ranAt: null });
                 }
                 lastEnv.current = envKey;
@@ -281,8 +288,8 @@ export default function App() {
     }, [envKey, launch]);
 
     const sessionValue = useMemo(
-        () => serializeSession({ mode, selectedTable, selection, fetchText, viewName, viewEdited, overridesByCtx }),
-        [mode, selectedTable, selection, fetchText, viewName, viewEdited, overridesByCtx],
+        () => serializeSession({ mode, selectedTable, selection, fetchText, viewName, viewEdited, queryNames, overridesByCtx }),
+        [mode, selectedTable, selection, fetchText, viewName, viewEdited, queryNames, overridesByCtx],
     );
     // Saving starts once this environment's session is loaded, so it never overwrites it with another environment's work
     useDebouncedSave(envKey && sessionFor === envKey ? sessionKey(envKey) : null, sessionValue, 800);
@@ -354,19 +361,20 @@ export default function App() {
         [overrides],
     );
 
-    const { model, modelError } = useMemo((): { model: QueryModel | null; modelError: string | null } => {
-        if (!parsed.doc || !tables || metadataPending) return { model: null, modelError: null };
+    const { model, modelError, modelInput } = useMemo((): { model: QueryModel | null; modelError: string | null; modelInput: ModelInput | null } => {
+        if (!parsed.doc || !tables || metadataPending) return { model: null, modelError: null, modelInput: null };
+        const input: ModelInput = {
+            doc: parsed.doc,
+            tables: tablesByName,
+            attributes: attrCache,
+            pageSize: settings.pageSize,
+            includeRecordUrl: settings.includeRecordUrl,
+            fromTablePicker: mode === "table",
+            odataFilter: mode === "table" && settings.activeOnly && hasStatecode ? "statecode eq 0" : null,
+            excluded: new Set(excludedKey ? excludedKey.split("\n") : []),
+        };
         try {
-            const m = buildQueryModel({
-                doc: parsed.doc,
-                tables: tablesByName,
-                attributes: attrCache,
-                pageSize: settings.pageSize,
-                includeRecordUrl: settings.includeRecordUrl,
-                fromTablePicker: mode === "table",
-                odataFilter: mode === "table" && settings.activeOnly && hasStatecode ? "statecode eq 0" : null,
-                excluded: new Set(excludedKey ? excludedKey.split("\n") : []),
-            });
+            const m = buildQueryModel(input);
             for (const e of entities?.all ?? []) {
                 if (attrFailed[e]) m.warnings.unshift(`Couldn't load the columns of ${e}: ${attrFailed[e]}`);
             }
@@ -376,9 +384,9 @@ export default function App() {
                     `Couldn't read the date formats of ${tablesByName.get(e)?.displayName ?? e}, so its date-only columns are treated as date and time. Reload the metadata to try again.`,
                 );
             }
-            return { model: m, modelError: null };
+            return { model: m, modelError: null, modelInput: input };
         } catch (err) {
-            return { model: null, modelError: errorMessage(err) };
+            return { model: null, modelError: errorMessage(err), modelInput: null };
         }
     }, [parsed.doc, tables, metadataPending, tablesByName, attrCache, settings.pageSize, settings.includeRecordUrl, settings.activeOnly, mode, hasStatecode, entities, attrFailed, excludedKey, dateFormatsMissing]);
 
@@ -412,7 +420,7 @@ export default function App() {
     const choiceSpecs = useMemo(() => (model ? choiceColumns(model.columns.filter((c) => !overrides[c.id]?.hidden)) : []), [model, overrides]);
 
     useEffect(() => {
-        if (settings.choiceTables !== "static" || tab !== "choices" || choiceSpecs.length === 0) return;
+        if (settings.choiceTables !== "static" || tab !== "model" || choiceSpecs.length === 0) return;
         const groups = new Map<string, { entity: string; kind: AttributeInfo["kind"] }>();
         for (const s of choiceSpecs) {
             const key = `${s.entity}|${s.attribute.kind}`;
@@ -456,6 +464,30 @@ export default function App() {
             ),
         [choiceSpecs, tablesByName, settings, connectionUrl, options],
     );
+
+    // ---------- model: choice tables, bridges and relationships ----------
+    const mainNameInput = queryNames[ctxKey] ?? "";
+    const suggestedName = model ? suggestedMainName(model.table) : "Query";
+    const dataModel = useMemo<DataModel | null>(() => {
+        if (!model || !modelInput) return null;
+        try {
+            return buildDataModel({
+                model,
+                outputs,
+                mainName: mainNameInput,
+                choiceQueries,
+                modelInput,
+                settings,
+                connectionUrl,
+                canAddColumns: mode === "table",
+                primaryKeyLabel: attrCache.get(model.table.logicalName)?.find((a) => a.isPrimaryId)?.displayName,
+            });
+        } catch (err) {
+            console.warn("Couldn't build the model", err);
+            return null;
+        }
+    }, [model, modelInput, outputs, mainNameInput, choiceQueries, settings, connectionUrl, mode, attrCache]);
+    const setMainName = useCallback((name: string) => setQueryNames((all) => ({ ...all, [ctxKey]: name })), [ctxKey]);
 
     // ---------- actions ----------
     const setOverride = useCallback(
@@ -652,7 +684,71 @@ export default function App() {
         }));
     }, [mode, tableAttrs, selectedTable, selection, specById, model, overrides]);
 
-    const queryName = (model?.table.displayName ?? "Query").replace(/[^\p{L}\p{N} _-]/gu, "").trim() || "Query";
+    const queryName = dataModel?.mainName ?? suggestedName;
+
+    // ---------- exports ----------
+    const [exporting, setExporting] = useState<"project" | "template" | "workbook" | null>(null);
+    const canExport = !!model && !!mCode && !mCode.startsWith("// Couldn't generate") && exporting === null;
+
+    // One query per workbook, so the URL is written into it instead of a parameter
+    const saveWorkbook = useCallback(async () => {
+        if (!model) return;
+        setExporting("workbook");
+        try {
+            const written = { ...settings, useParameter: false };
+            const code = useOData ? generateODataQuery(model, outputs, written, connectionUrl) : generateFetchXmlQuery(model, outputs, written, connectionUrl);
+            const columns = dataModel?.mainColumns.map((c) => c.name) ?? outputs.map((o) => o.name);
+            const bytes = await buildWorkbook(queryName, code, columns);
+            await saveBytes(`${fileSafeName(queryName)}.xlsx`, bytes, [{ name: "Excel workbook", extensions: ["xlsx"] }]);
+        } catch (err) {
+            await notify("Couldn't make the workbook", errorMessage(err), "error");
+        } finally {
+            setExporting(null);
+        }
+    }, [model, settings, useOData, outputs, connectionUrl, dataModel, queryName]);
+
+    // The project and the template hold the same model
+    const modelExport = useCallback(
+        (): PowerBiProjectInput | null =>
+            dataModel && mCode
+                ? {
+                      name: dataModel.mainName,
+                      main: { name: dataModel.mainName, code: mCode, columns: dataModel.mainColumns },
+                      queries: dataModel.queries,
+                      relationships: dataModel.relationships,
+                      parameter: settings.useParameter ? { name: settings.parameterName.trim() || "DataverseUrl", code: parameterCode } : null,
+                  }
+                : null,
+        [dataModel, mCode, settings, parameterCode],
+    );
+
+    const saveProject = useCallback(async () => {
+        const input = modelExport();
+        if (!input) return;
+        setExporting("project");
+        try {
+            const project = buildPowerBiProject(input);
+            await saveProjectFolder(project, "Power BI project", `${project.name}.pbip`);
+        } catch (err) {
+            await notify("Couldn't make the Power BI project", errorMessage(err), "error");
+        } finally {
+            setExporting(null);
+        }
+    }, [modelExport]);
+
+    const saveTemplate = useCallback(async () => {
+        const input = modelExport();
+        if (!input) return;
+        setExporting("template");
+        try {
+            const bytes = await buildPowerBiTemplate(input);
+            await saveBytes(`${fileSafeName(input.name)}.pbit`, bytes, [{ name: "Power BI template", extensions: ["pbit"] }]);
+        } catch (err) {
+            await notify("Couldn't make the Power BI template", errorMessage(err), "error");
+        } finally {
+            setExporting(null);
+        }
+    }, [modelExport]);
     const currentTable = selectedTable ? tablesByName.get(selectedTable) : undefined;
     const currentViews = selectedTable ? views[selectedTable] : undefined;
 
@@ -660,7 +756,6 @@ export default function App() {
     // An empty editor has to be open to paste into, and an error has to be visible next to its cause
     const editorExpanded = editorOpen || !fetchText.trim() || !!parsed.error;
     const fetchSubject = model ? `${model.table.displayName}${model.hasLinks ? " and linked tables" : ""}` : "";
-    const editorSummary = viewName ? `${viewEdited ? "Changed view" : "View"}: ${viewName}` : fetchSubject;
 
     // ---------- render ----------
     const viewMenu = mode === "table" && selectedTable && <ViewMenu key={selectedTable} views={currentViews} onOpen={openViews} onPick={(view) => openFetchXml(view.fetchXml, { view: view.name })} />;
@@ -757,7 +852,6 @@ export default function App() {
                                     }}
                                     expanded={editorExpanded}
                                     onToggle={() => setEditorOpen(!editorExpanded)}
-                                    summary={editorSummary}
                                     error={parsed.error}
                                     onFormat={formatFetch}
                                     onLoadFile={() => void loadFetchFile()}
@@ -809,7 +903,11 @@ export default function App() {
                         settings={settings}
                         updateSettings={update}
                         parameterCode={parameterCode}
-                        choiceQueries={choiceQueries}
+                        dataModel={dataModel}
+                        mainNameInput={mainNameInput}
+                        suggestedMainName={suggestedName}
+                        onMainName={setMainName}
+                        onFix={(fix) => (fix.kind === "include" ? toggleColumns([fix.colId], true) : setOverride(fix.colId, { mode: fix.mode }))}
                         choiceLoading={optionsLoading}
                         choiceError={optionsError}
                         onEditAsFetchXml={() => model && openFetchXml(model.fetchXml, { carryOverridesFrom: ctxKey, expand: true })}
@@ -819,6 +917,11 @@ export default function App() {
                         onReturn={() => void returnToCaller()}
                         onCopy={(t, w) => void copyText(t, w)}
                         onSave={(n, t) => void saveText(n, t)}
+                        canExport={canExport}
+                        exporting={exporting}
+                        onSaveWorkbook={() => void saveWorkbook()}
+                        onSaveProject={() => void saveProject()}
+                        onSaveTemplate={() => void saveTemplate()}
                         queryName={queryName}
                         emptyHint={emptyHint}
                     />

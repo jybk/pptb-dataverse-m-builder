@@ -11,6 +11,8 @@ npm run build     # type-check and build to dist/
 npm run validate  # the same package checks the ToolBox registry runs
 ```
 
+`PBIP_OUT=/some/folder npm test` also writes the Power BI projects from `tests/pbip.test.ts` to that folder, with each table's expected M next to them. Reading a project's `definition` folder with Microsoft's `TmdlSerializer.DeserializeDatabaseFromFolder` (NuGet `Microsoft.AnalysisServices.NetCore.retail.amd64`) and comparing every partition's M with the expected file is how the TMDL was checked. The same run writes templates (`.pbit`) from `tests/pbit.test.ts`; they were checked by opening them with `System.IO.Packaging` and reading their `DataModelSchema` part with Microsoft's `JsonSerializer.DeserializeDatabase`. Microsoft doesn't document the other parts of a template; they mirror the templates Power BI Desktop writes, such as those in Microsoft's CoE Starter Kit.
+
 In Power Platform ToolBox: Settings → _Show Debug Menu_, then Debug → _Load Local Tool_ → choose this folder. After changes, run `npm run build` and reopen the tool tab. `npm run dev-watch` rebuilds with source maps on every save. Every push and pull request runs the tests, the build and the registry validation in GitHub Actions (`.github/workflows/ci.yml`). _Load Local Tool_ only lasts for the current ToolBox session.
 
 ## Project layout
@@ -18,7 +20,12 @@ In Power Platform ToolBox: Settings → _Show Debug Menu_, then Debug → _Load 
 ```
 src/lib/fetchxml.ts    FetchXML parsing, aliasing, normalisation and the query model
 src/lib/columns.ts     output columns, modes, naming and types
-src/lib/mcode.ts       M generation: FetchXML, OData, choice tables, parameter
+src/lib/mcode.ts       M generation: FetchXML, OData, choice tables, bridge tables, parameter
+src/lib/model.ts       the Model tab: which queries go with the main one (choice, bridge and lookup tables), relationships and the TMDL script
+src/lib/pbip.ts        Power BI project export: .pbip, report and semantic model files (TMDL), as Power BI Desktop writes them
+src/lib/pbip/          Power BI Desktop's base theme, saved next to the report (from Microsoft's fabric-cicd samples, MIT)
+src/lib/pbit.ts        Power BI template export: the same model as a .pbit, with the parts Power BI Desktop writes
+src/lib/xlsx.ts        Excel export, through Microsoft's connected-workbooks library
 src/lib/metadata.ts    metadata mapping
 src/lib/dataverse.ts   calls to the ToolBox Dataverse API
 src/lib/preview.ts     applies the M shaping to preview rows

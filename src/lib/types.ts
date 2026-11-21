@@ -76,6 +76,8 @@ export interface BuilderSettings {
     utcOffsetMinutes: number;
     daylightSaving: DaylightSaving;
     choiceTables: "live" | "static";
+    /** Whether the Model tab adds a lookup table for each lookup column. */
+    lookupTables: boolean;
 }
 
 export const DEFAULT_SETTINGS: BuilderSettings = {
@@ -95,6 +97,7 @@ export const DEFAULT_SETTINGS: BuilderSettings = {
     utcOffsetMinutes: 60,
     daylightSaving: "none",
     choiceTables: "live",
+    lookupTables: true,
 };
 
 /** Per-column choices the user makes in the column grid. */
