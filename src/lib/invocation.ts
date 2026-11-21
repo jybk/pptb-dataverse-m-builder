@@ -1,5 +1,5 @@
 // Helpers for the inter-tool invocation API (toolboxAPI.invocation).
-import { name as PACKAGE_NAME } from "../../package.json";
+import { displayName as DISPLAY_NAME, name as PACKAGE_NAME } from "../../package.json";
 
 /**
  * The ids ToolBox may use for this tool: the npm package name (npm, registry and local installs
@@ -24,6 +24,8 @@ export function otherTools(tools: unknown[] | null | undefined): ToolRef[] {
         };
         if (typeof t.id !== "string" || !t.id) continue;
         if (OWN_IDS.has(t.id) || (typeof t.npmPackageName === "string" && OWN_IDS.has(t.npmPackageName))) continue;
+        // Another copy of this tool (a marketplace install next to a local one, under its own id) isn't an editor to send the query to
+        if (t.name === DISPLAY_NAME) continue;
         result.push({
             id: t.id,
             name: typeof t.name === "string" && t.name ? t.name : t.id,

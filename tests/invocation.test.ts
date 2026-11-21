@@ -15,6 +15,7 @@ describe("otherTools", () => {
                 npmPackageName: pkg.name,
             }, // official registry
             { id: bare, name: "Dataverse M Builder" }, // private marketplace
+            { id: "6f1d2c3b-marketplace", name: "Dataverse M Builder" }, // a marketplace copy next to a local one, under its own id
         ];
         expect(otherTools(tools)).toEqual([{ id: "fetchxml-studio", name: "FetchXML Studio" }]);
     });

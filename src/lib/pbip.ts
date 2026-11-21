@@ -106,8 +106,8 @@ export function isHiddenTable(t: ProjectTable): boolean {
 }
 
 /** Keys of lookup tables only serve the relationships. */
-export function isHiddenColumn(t: ProjectTable, c: QueryColumn): boolean {
-    return t.kind === "lookup" && c === t.columns[0];
+export function isHiddenColumn(_t: ProjectTable, c: QueryColumn): boolean {
+    return c.hidden === true;
 }
 
 /** The main query first, then the Model tab's queries. */

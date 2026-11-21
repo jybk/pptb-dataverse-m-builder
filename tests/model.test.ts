@@ -252,6 +252,42 @@ describe("lookup tables", () => {
     });
 });
 
+describe("lookup tables with more columns", () => {
+    const contactColumns = { contact: { columns: ["emailaddress1", "parentcustomerid", "nonexistent"], overrides: { "|emailaddress1": { name: "Contact e-mail" } } } };
+
+    it("read the target table with the added columns, key and name under the lookup table's names", async () => {
+        const { data } = setup(fetch(["name", "primarycontactid"]), { lookups: true, lookupColumns: contactColumns });
+        const contact = data.queries.find((q) => q.kind === "lookup")!;
+        await expectValidM(contact.code);
+        expect(contact.code).toMatch(/^\/\/ Suggested query name: Contact\n/);
+        expect(contact.code).toContain("// Lookup table: Contact (contact) for Primary Contact. Every row is read, active or not");
+        expect(contact.code).toContain('#"$select" = "contactid,fullname,emailaddress1,_parentcustomerid_value"');
+        expect(contact.code).not.toContain("$filter");
+        expect(contact.columns.map((c) => c.name)).toEqual(["Contact key", "Contact name", "Contact e-mail", "Company Name", "Company Name ID"]);
+        expect(contact.columns[0].hidden).toBe(true);
+        expect(contact.addedColumns).toBe(2);
+        expect(contact.target?.logicalName).toBe("contact");
+        expect(data.relationships.map(rel)).toEqual(["Account[Primary Contact ID] -> Contact[Contact key]"]);
+    });
+
+    it("stay key and name when nothing valid is added", () => {
+        const { data } = setup(fetch(["name", "primarycontactid"]), { lookups: true, lookupColumns: { contact: { columns: ["contactid", "nonexistent"], overrides: {} } } });
+        const contact = data.queries.find((q) => q.kind === "lookup")!;
+        expect(contact.code).toContain('Result = Rows("contacts", "contactid", "fullname")');
+        expect(contact.addedColumns).toBeUndefined();
+    });
+
+    it("apply to lookup tables of one table only, not to combined ones", () => {
+        const { data } = setup(fetch(["name", "ownerid", "createdby"]), {
+            lookups: true,
+            lookupColumns: { systemuser: { columns: ["fullname"], overrides: {} }, team: { columns: ["name"], overrides: {} } },
+        });
+        const owner = data.queries.find((q) => q.queryName === "Owner")!;
+        expect(owner.target).toBeUndefined();
+        expect(owner.code).toContain("Table.Combine");
+    });
+});
+
 describe("TMDL script", () => {
     it("quotes names the way TMDL needs", () => {
         expect(tmdlName("Account")).toBe("Account");

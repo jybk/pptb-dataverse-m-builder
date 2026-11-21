@@ -4,7 +4,7 @@ import { buildQueryModel, parseFetchXml, type ModelInput } from "../src/lib/fetc
 import { choiceColumns, generateChoiceQuery, generateFetchXmlQuery } from "../src/lib/mcode";
 import { buildDataModel } from "../src/lib/model";
 import { mapAttributes } from "../src/lib/metadata";
-import { DEFAULT_SETTINGS, type AttributeInfo, type BuilderSettings, type ColumnOverrides, type TableInfo } from "../src/lib/types";
+import { DEFAULT_SETTINGS, type AttributeInfo, type BuilderSettings, type ColumnOverrides, type LookupColumns, type TableInfo } from "../src/lib/types";
 import { attr, fixture, rawAccountAttributes, rawAccountDates, rawAccountLookups, rawContactAttributes } from "./fixtures";
 
 /** Shared by the model and Power BI project tests: a query and everything the Model tab builds from it. */
@@ -23,6 +23,7 @@ export interface SetupOptions {
     /** Lookups and tables beyond the shared fixture. */
     lookups?: boolean;
     recordUrl?: boolean;
+    lookupColumns?: Record<string, LookupColumns>;
 }
 
 export const LOOKUP_TABLES: TableInfo[] = [
@@ -83,6 +84,7 @@ export function setup(xml: string, opts: SetupOptions = {}) {
         settings,
         connectionUrl: URL,
         canAddColumns: !!opts.canAddColumns,
+        lookupColumns: opts.lookupColumns,
     });
     const mainCode = generateFetchXmlQuery(model, outputs, settings, URL);
     return { model, outputs, data, settings, mainCode, tables };

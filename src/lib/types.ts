@@ -108,9 +108,19 @@ export interface ColumnOverride {
     name?: string;
     /** In FetchXML mode: leave this column out of the M output. */
     hidden?: boolean;
+    /** In FetchXML mode: a column the FetchXML doesn't have, added to the query from the grid. */
+    added?: boolean;
 }
 
 export type ColumnOverrides = Record<string, ColumnOverride>;
+
+/** Columns added to a lookup table besides its key and name, with their names and output modes. */
+export interface LookupColumns {
+    /** Logical names of the target table's columns. */
+    columns: string[];
+    /** By column id ("|<logical name>"), as in the main grid. */
+    overrides: ColumnOverrides;
+}
 
 /** One attribute requested by the query, resolved against metadata. */
 export interface ColumnSpec {
@@ -126,6 +136,15 @@ export interface ColumnSpec {
     attribute: AttributeInfo;
     /** Key of the value in the Web API JSON response. */
     key: string;
+    /** Added from the grid rather than written in the FetchXML. */
+    added?: boolean;
+}
+
+/** A table whose columns a FetchXML query returns: the main table, or a linked table by its alias. */
+export interface ColumnSource {
+    alias: string | null;
+    entity: string;
+    label: string;
 }
 
 export type OutputRole = "value" | "label" | "id" | "name" | "table";
@@ -160,5 +179,7 @@ export interface QueryModel {
     /** Only for queries built from the table picker: OData equivalent. */
     /** Set when the query can also be written in OData; the $select comes from the output columns (odataSelect). */
     odata: { filter: string | null } | null;
+    /** Tables more columns can be added from (none for aggregate queries). */
+    sources: ColumnSource[];
     warnings: string[];
 }

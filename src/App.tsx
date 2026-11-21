@@ -7,6 +7,7 @@ import {
     MessageBar,
     MessageBarBody,
     Spinner,
+    Switch,
     Tab,
     TabList,
     Title3,
@@ -28,7 +29,8 @@ import { outputWarnings, resolveOutputColumns } from "./lib/columns";
 import { errorMessage, loadAttributes, loadOptions, loadTables, loadViews, runFetchPreview, runODataPreview, type ViewInfo } from "./lib/dataverse";
 import { buildQueryModel, buildTableFetchXml, fetchEntities, FetchXmlError, linesToXml, parseFetchXml, previewFetchXml, serializeLines, type ModelInput } from "./lib/fetchxml";
 import { callerExpectsReply, otherTools } from "./lib/invocation";
-import { buildDataModel, suggestedMainName, type DataModel } from "./lib/model";
+import { buildDataModel, lookupTableQuery, suggestedMainName, type DataModel } from "./lib/model";
+import { LookupColumnsDialog } from "./components/LookupColumnsDialog";
 import { buildPowerBiTemplate } from "./lib/pbit";
 import { buildPowerBiProject, fileSafeName, type PowerBiProjectInput } from "./lib/pbip";
 import { buildWorkbook } from "./lib/xlsx";
@@ -36,7 +38,7 @@ import { EMPTY_SESSION, MAX_FETCH_LENGTH, parseSession, serializeSession, sessio
 import { choiceColumns, generateChoiceQuery, generateFetchXmlQuery, generateODataQuery, generateParameterQuery, normaliseUrl, odataSelect, type ChoiceQuery } from "./lib/mcode";
 import type { ChoiceOption } from "./lib/metadata";
 import { buildPreview } from "./lib/preview";
-import type { AttributeInfo, ColumnOverride, ColumnOverrides, OutputColumn, QueryModel, TableInfo } from "./lib/types";
+import type { AttributeInfo, ColumnOverride, ColumnOverrides, LookupColumns, OutputColumn, QueryModel, TableInfo } from "./lib/types";
 
 /** The left pane's width, in percent of the window. */
 const SPLIT_MIN = 30;
@@ -132,11 +134,15 @@ export default function App() {
     /** The view the FetchXML came from, and whether it was changed since. */
     const [viewName, setViewName] = useState<string | null>(null);
     const [viewEdited, setViewEdited] = useState(false);
+    // FetchXML mode: also list the columns the query doesn't have, to add them
+    const [showOtherColumns, setShowOtherColumns] = useState(false);
     /** The FetchXML editor is collapsed once a query is loaded; it opens by itself when it's empty or has an error. */
     const [editorOpen, setEditorOpen] = useState(false);
     const [overridesByCtx, setOverridesByCtx] = useState<Record<string, ColumnOverrides>>({});
     /** The main query's name in the model, as typed, per table or FetchXML root table. */
     const [queryNames, setQueryNames] = useState<Record<string, string>>({});
+    // Extra columns of lookup tables, per query (table or FetchXML root) and target table
+    const [lookupColumnsByCtx, setLookupColumnsByCtx] = useState<Record<string, Record<string, LookupColumns>>>({});
     const [tab, setTab] = useState<OutputTab>("m");
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [views, setViews] = useState<Record<string, ViewInfo[] | "loading" | "error">>({});
@@ -273,6 +279,7 @@ export default function App() {
                     setEditorOpen(false);
                     setOverridesByCtx(saved.overridesByCtx);
                     setQueryNames(saved.queryNames);
+                    setLookupColumnsByCtx(saved.lookupColumnsByCtx);
                     setPreview({ loading: false, error: null, result: null, ranAt: null });
                 }
                 lastEnv.current = envKey;
@@ -288,8 +295,8 @@ export default function App() {
     }, [envKey, launch]);
 
     const sessionValue = useMemo(
-        () => serializeSession({ mode, selectedTable, selection, fetchText, viewName, viewEdited, queryNames, overridesByCtx }),
-        [mode, selectedTable, selection, fetchText, viewName, viewEdited, queryNames, overridesByCtx],
+        () => serializeSession({ mode, selectedTable, selection, fetchText, viewName, viewEdited, queryNames, overridesByCtx, lookupColumnsByCtx }),
+        [mode, selectedTable, selection, fetchText, viewName, viewEdited, queryNames, overridesByCtx, lookupColumnsByCtx],
     );
     // Saving starts once this environment's session is loaded, so it never overwrites it with another environment's work
     useDebouncedSave(envKey && sessionFor === envKey ? sessionKey(envKey) : null, sessionValue, 800);
@@ -361,6 +368,19 @@ export default function App() {
         [overrides],
     );
 
+    // Columns added to a FetchXML query from the grid, as a string for the same reason
+    const addedKey = useMemo(
+        () =>
+            mode === "table"
+                ? ""
+                : Object.entries(overrides)
+                      .filter(([, o]) => o.added && !o.hidden)
+                      .map(([id]) => id)
+                      .sort()
+                      .join("\n"),
+        [mode, overrides],
+    );
+
     const { model, modelError, modelInput } = useMemo((): { model: QueryModel | null; modelError: string | null; modelInput: ModelInput | null } => {
         if (!parsed.doc || !tables || metadataPending) return { model: null, modelError: null, modelInput: null };
         const input: ModelInput = {
@@ -372,6 +392,7 @@ export default function App() {
             fromTablePicker: mode === "table",
             odataFilter: mode === "table" && settings.activeOnly && hasStatecode ? "statecode eq 0" : null,
             excluded: new Set(excludedKey ? excludedKey.split("\n") : []),
+            added: new Set(addedKey ? addedKey.split("\n") : []),
         };
         try {
             const m = buildQueryModel(input);
@@ -388,9 +409,10 @@ export default function App() {
         } catch (err) {
             return { model: null, modelError: errorMessage(err), modelInput: null };
         }
-    }, [parsed.doc, tables, metadataPending, tablesByName, attrCache, settings.pageSize, settings.includeRecordUrl, settings.activeOnly, mode, hasStatecode, entities, attrFailed, excludedKey, dateFormatsMissing]);
+    }, [parsed.doc, tables, metadataPending, tablesByName, attrCache, settings.pageSize, settings.includeRecordUrl, settings.activeOnly, mode, hasStatecode, entities, attrFailed, excludedKey, addedKey, dateFormatsMissing]);
 
     const outputs = useMemo<OutputColumn[]>(() => (model ? resolveOutputColumns(model.columns, settings, overrides, !!model.recordUrlKey) : []), [model, settings, overrides]);
+    const specById = useMemo(() => new Map((model?.columns ?? []).map((c) => [c.id, c])), [model]);
     const outputsByCol = useMemo(() => {
         const m = new Map<string, OutputColumn[]>();
         for (const o of outputs) m.set(o.colId, [...(m.get(o.colId) ?? []), o]);
@@ -467,6 +489,11 @@ export default function App() {
 
     // ---------- model: choice tables, bridges and relationships ----------
     const mainNameInput = queryNames[ctxKey] ?? "";
+    const lookupColumns = lookupColumnsByCtx[ctxKey];
+    // The target tables of lookup tables with added columns need their column lists
+    useEffect(() => {
+        if (lookupColumns) ensureAttributes(Object.keys(lookupColumns));
+    }, [lookupColumns, ensureAttributes]);
     const suggestedName = model ? suggestedMainName(model.table) : "Query";
     const dataModel = useMemo<DataModel | null>(() => {
         if (!model || !modelInput) return null;
@@ -479,15 +506,46 @@ export default function App() {
                 modelInput,
                 settings,
                 connectionUrl,
-                canAddColumns: mode === "table",
+                // Columns can be added in both modes, except to aggregate queries
+                canAddColumns: mode === "table" || !model.isAggregate,
                 primaryKeyLabel: attrCache.get(model.table.logicalName)?.find((a) => a.isPrimaryId)?.displayName,
+                lookupColumns,
             });
         } catch (err) {
             console.warn("Couldn't build the model", err);
             return null;
         }
-    }, [model, modelInput, outputs, mainNameInput, choiceQueries, settings, connectionUrl, mode, attrCache]);
+    }, [model, modelInput, outputs, mainNameInput, choiceQueries, settings, connectionUrl, mode, attrCache, lookupColumns]);
     const setMainName = useCallback((name: string) => setQueryNames((all) => ({ ...all, [ctxKey]: name })), [ctxKey]);
+
+    // ---------- columns of a lookup table ----------
+    const [lookupEditor, setLookupEditor] = useState<string | null>(null);
+    const editedLookup = lookupEditor ? dataModel?.queries.find((q) => q.id === lookupEditor && q.target) : undefined;
+    const editedTarget = editedLookup?.target;
+    const editedChoice = useMemo<LookupColumns>(
+        () => (editedTarget && lookupColumns?.[editedTarget.logicalName]) || { columns: [], overrides: {} },
+        [editedTarget, lookupColumns],
+    );
+    useEffect(() => {
+        if (editedTarget) ensureAttributes([editedTarget.logicalName]);
+    }, [editedTarget, ensureAttributes]);
+    const lookupPreview = useMemo(
+        () =>
+            editedLookup && editedTarget && modelInput
+                ? lookupTableQuery(editedTarget, editedLookup.queryName, editedChoice, [], { modelInput, settings, connectionUrl })
+                : null,
+        [editedLookup, editedTarget, editedChoice, modelInput, settings, connectionUrl],
+    );
+    const setLookupChoice = useCallback(
+        (target: string, choice: LookupColumns) =>
+            setLookupColumnsByCtx((all) => {
+                const forCtx = { ...(all[ctxKey] ?? {}) };
+                if (choice.columns.length > 0) forCtx[target] = choice;
+                else delete forCtx[target];
+                return { ...all, [ctxKey]: forCtx };
+            }),
+        [ctxKey],
+    );
 
     // ---------- actions ----------
     const setOverride = useCallback(
@@ -519,12 +577,21 @@ export default function App() {
             } else {
                 setOverridesByCtx((all) => {
                     const ctx = { ...(all[ctxKey] ?? {}) };
-                    for (const id of ids) ctx[id] = { ...(ctx[id] ?? {}), hidden: !included };
+                    for (const id of ids) {
+                        const spec = specById.get(id);
+                        if (!spec || spec.added) {
+                            // Not in the FetchXML: ticking adds it to the query, unticking takes it out again
+                            const { hidden: _hidden, added: _added, ...rest } = ctx[id] ?? {};
+                            ctx[id] = included ? { ...rest, added: true } : rest;
+                        } else {
+                            ctx[id] = { ...(ctx[id] ?? {}), hidden: !included };
+                        }
+                    }
                     return { ...all, [ctxKey]: ctx };
                 });
             }
         },
-        [mode, selectedTable, ctxKey],
+        [mode, selectedTable, ctxKey, specById],
     );
 
     /**
@@ -665,7 +732,6 @@ export default function App() {
     };
 
     // ---------- grid rows ----------
-    const specById = useMemo(() => new Map((model?.columns ?? []).map((c) => [c.id, c])), [model]);
     const gridRows = useMemo<GridRow[]>(() => {
         if (mode === "table") {
             if (!tableAttrs || !selectedTable) return [];
@@ -675,14 +741,29 @@ export default function App() {
                 return { id, attribute: a, included: chosen.has(a.logicalName), spec: chosen.has(a.logicalName) ? (specById.get(id) ?? null) : null };
             });
         }
-        return (model?.columns ?? []).map((c) => ({
+        const rows: GridRow[] = (model?.columns ?? []).map((c) => ({
             id: c.id,
             attribute: c.attribute,
             included: !overrides[c.id]?.hidden,
             spec: c,
-            note: [c.linkAlias ? `via ${c.linkAlias}` : null, c.attrAlias ? `as ${c.attrAlias}` : null, c.aggregate ? c.aggregate : null].filter(Boolean).join(" · ") || undefined,
+            note:
+                [c.linkAlias ? `via ${c.linkAlias}` : null, c.attrAlias ? `as ${c.attrAlias}` : null, c.aggregate ? c.aggregate : null, c.added ? "added" : null]
+                    .filter(Boolean)
+                    .join(" · ") || undefined,
         }));
-    }, [mode, tableAttrs, selectedTable, selection, specById, model, overrides]);
+        if (!showOtherColumns || !model) return rows;
+        // The other columns of the main table and of each linked table that returns columns, to add to the query
+        const present = new Set(rows.map((r) => r.id));
+        for (const source of model.sources) {
+            const others = (attrCache.get(source.entity) ?? [])
+                .filter((a) => !present.has(`${source.alias ?? ""}|${a.logicalName}`))
+                .sort((a, b) => a.displayName.localeCompare(b.displayName));
+            for (const a of others) {
+                rows.push({ id: `${source.alias ?? ""}|${a.logicalName}`, attribute: a, included: false, spec: null, note: source.alias ? `via ${source.alias}` : undefined });
+            }
+        }
+        return rows;
+    }, [mode, tableAttrs, selectedTable, selection, specById, model, overrides, showOtherColumns, attrCache]);
 
     const queryName = dataModel?.mainName ?? suggestedName;
 
@@ -866,6 +947,13 @@ export default function App() {
                                     rows={gridRows}
                                     loading={metadataPending}
                                     emptyText="Columns from the FetchXML appear here."
+                                    headerActions={
+                                        model && model.sources.length > 0 ? (
+                                            <Tooltip content="Also list the columns this query doesn't have yet, to add them" relationship="description">
+                                                <Switch label="Other columns" checked={showOtherColumns} onChange={(_, d) => setShowOtherColumns(d.checked)} />
+                                            </Tooltip>
+                                        ) : undefined
+                                    }
                                     includeLabel="In output"
                                     outputsByCol={outputsByCol}
                                     settings={settings}
@@ -922,9 +1010,22 @@ export default function App() {
                         onSaveWorkbook={() => void saveWorkbook()}
                         onSaveProject={() => void saveProject()}
                         onSaveTemplate={() => void saveTemplate()}
+                        onEditLookup={setLookupEditor}
                         queryName={queryName}
                         emptyHint={emptyHint}
                     />
+                    {editedLookup && editedTarget && (
+                        <LookupColumnsDialog
+                            target={editedTarget}
+                            queryName={editedLookup.queryName}
+                            attributes={attrCache.get(editedTarget.logicalName)}
+                            choice={editedChoice}
+                            preview={lookupPreview}
+                            settings={settings}
+                            onChange={(choice) => setLookupChoice(editedTarget.logicalName, choice)}
+                            onClose={() => setLookupEditor(null)}
+                        />
+                    )}
                 </div>
             </div>
         );

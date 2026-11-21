@@ -107,6 +107,8 @@ export function OutputPanel(props: {
     onSaveWorkbook: () => void;
     onSaveProject: () => void;
     onSaveTemplate: () => void;
+    /** Opens the column picker of a lookup table, by query id. */
+    onEditLookup: (queryId: string) => void;
     queryName: string;
     emptyHint: ReactNode;
 }) {
@@ -329,6 +331,7 @@ export function OutputPanel(props: {
                     onSaveWorkbook={props.onSaveWorkbook}
                     onSaveProject={props.onSaveProject}
                     onSaveTemplate={props.onSaveTemplate}
+                    onEditLookup={props.onEditLookup}
                 />
             )}
 

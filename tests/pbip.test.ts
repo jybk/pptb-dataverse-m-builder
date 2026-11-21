@@ -140,4 +140,15 @@ describe("Power BI project", () => {
         expect(fileSafeName("  ")).toBe("Dataverse");
         expect(fileSafeName("a/b\\c:d*e?f")).toBe("abcdef");
     });
+
+    it("declares a lookup table's added columns", () => {
+        const lookupColumns = { contact: { columns: ["emailaddress1", "parentcustomerid"], overrides: {} } };
+        const p = project({ lookupColumns }, "Extended");
+        writeOut(p, expectedM({ lookupColumns }));
+        const contact = file(p, "Extended.SemanticModel/definition/tables/Contact.tmdl");
+        expect(contact).toContain("\tcolumn 'Contact key'\n\t\tdataType: string\n\t\tisHidden\n");
+        expect(contact).toContain("\tcolumn Email\n\t\tdataType: string\n");
+        expect(contact).toContain("\tcolumn 'Company Name ID'\n");
+        expect(contact).toContain('#"$select" = "contactid,fullname,emailaddress1,_parentcustomerid_value"');
+    });
 });

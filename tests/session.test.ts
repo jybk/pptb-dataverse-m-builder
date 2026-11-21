@@ -11,7 +11,11 @@ const session: Session = {
     viewName: "Active Accounts",
     viewEdited: true,
     queryNames: { "table:account": "Klanten" },
-    overridesByCtx: { "table:account": { "|name": { name: "Customer" }, "|statecode": { mode: "value", hidden: true } } },
+    overridesByCtx: {
+        "table:account": { "|name": { name: "Customer" }, "|statecode": { mode: "value", hidden: true } },
+        "fetch:account": { "|websiteurl": { added: true }, "contact|emailaddress1": { added: true, name: "Contact e-mail" } },
+    },
+    lookupColumnsByCtx: { "fetch:account": { contact: { columns: ["emailaddress1", "parentcustomerid"], overrides: { "|parentcustomerid": { mode: "name" } } } } },
 };
 
 describe("remembered session", () => {
@@ -39,7 +43,11 @@ describe("remembered session", () => {
             viewName: 7,
             viewEdited: "yes",
             queryNames: { "table:account": "Klanten", "table:contact": "  ", broken: 3 },
-            overridesByCtx: { "table:account": { "|name": { name: "", mode: 3, hidden: "yes" }, "|revenue": { name: "Omzet" } }, broken: 1 },
+            overridesByCtx: { "table:account": { "|name": { name: "", mode: 3, hidden: "yes", added: "yes" }, "|revenue": { name: "Omzet" } }, broken: 1 },
+            lookupColumnsByCtx: {
+                "table:account": { contact: { columns: ["emailaddress1", 3, ""], overrides: { "|emailaddress1": { name: "E-mail" }, "|x": 1 } }, team: { columns: "all" }, user: { columns: [] } },
+                broken: 1,
+            },
         });
         expect(parsed).toEqual({
             mode: "table",
@@ -50,12 +58,13 @@ describe("remembered session", () => {
             viewEdited: false,
             queryNames: { "table:account": "Klanten" },
             overridesByCtx: { "table:account": { "|revenue": { name: "Omzet" } } },
+            lookupColumnsByCtx: { "table:account": { contact: { columns: ["emailaddress1"], overrides: { "|emailaddress1": { name: "E-mail" } } } } },
         });
     });
 
     it("reads a session saved before view names were remembered", () => {
-        const { viewName: _name, viewEdited: _edited, queryNames: _names, ...older } = session;
-        expect(parseSession(JSON.parse(JSON.stringify({ v: 1, ...older })))).toEqual({ ...session, viewName: null, viewEdited: false, queryNames: {} });
+        const { viewName: _name, viewEdited: _edited, queryNames: _names, lookupColumnsByCtx: _lookups, ...older } = session;
+        expect(parseSession(JSON.parse(JSON.stringify({ v: 1, ...older })))).toEqual({ ...session, viewName: null, viewEdited: false, queryNames: {}, lookupColumnsByCtx: {} });
     });
 
     it("doesn't store an enormous pasted query", () => {

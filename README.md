@@ -14,8 +14,8 @@ In Power Platform ToolBox (version 1.2.7 or later), open the **Marketplace**, se
 
 **Two ways to build a query**
 
-- **Table & columns**: search the tables, tick the columns you want, choose how each one comes out, and rename it. _Start from a view_ loads any system or personal view, including its filters and linked tables; type in the search box above the list to find a view by name.
-- **FetchXML**: paste or open FetchXML, for example from FetchXML Studio. Linked tables (`link-entity`), column aliases, `all-attributes`, `top` and aggregate queries are all supported. The editor folds away once a query is loaded (click _FetchXML_ to open it), and the column list shows which view you started from. Untick a column to take it out of the generated query. _Edit in…_ sends the query to another installed FetchXML tool and picks up the result when that tool returns one.
+- **Table & columns**: search the tables, tick the columns you want, choose how each one comes out, and rename it. The checkbox at the top of the column list selects or clears every column the list shows, so after a search it only touches the matches. _Start from a view_ loads any system or personal view, including its filters and linked tables; type in the search box above the list to find a view by name.
+- **FetchXML**: paste or open FetchXML, for example from FetchXML Studio. Linked tables (`link-entity`), column aliases, `all-attributes`, `top` and aggregate queries are all supported. The editor folds away once a query is loaded (click _FetchXML_ to open it), and the column list shows which view you started from. Untick a column to take it out of the generated query. Switch on _Other columns_ to also list the columns the query doesn't have yet, of the main table and of each linked table that returns columns, and tick one to add it; your FetchXML stays as you wrote it, and the generated query includes the column. Aggregate queries can't take more columns, since they would change the grouping. _Edit in…_ sends the query to another installed FetchXML tool and picks up the result when that tool returns one.
 
 **Per-column output**
 
@@ -38,7 +38,7 @@ You can choose display names (`Primary Contact`, `Primary Contact ID`), logical 
 - **Model**: the tables that go with the main query, and the relationships between them:
   - a choice table (_Value / Label_) per choice, status, yes/no or multi-select column;
   - a bridge table per multi-select column of the main table, with one row per record and selected choice, so you can filter and count by each choice;
-  - a lookup table per table the lookup columns point to, with its key and primary name. Owner (users and teams) and Customer (accounts and contacts) are one table each, with a type column;
+  - a lookup table per table the lookup columns point to, with its key and primary name. _Columns…_ adds more of that table's columns, chosen and shaped like the main query's. Owner (users and teams) and Customer (accounts and contacts) are one table each, with a type column;
   - the relationships, as a list and as a TMDL script you paste into Power BI Desktop's _TMDL view_ to create them all at once. Applying the script again replaces those relationships instead of adding copies.
 - **Parameter**: the `DataverseUrl` parameter query, with the Web API address.
 - **FetchXML**: the normalised FetchXML that is embedded in the M.
@@ -104,6 +104,8 @@ A multi-select column's bridge relates to the main query in both directions, so 
 
 Lookup tables read every row of their table through OData, active or not, so each record finds its match; for a large table (all contacts, say) that is a sizeable load, even with only two columns. Lookups that point to the same tables share one lookup table: _Created By_ and _Modified By_ both relate to _User_, the first through an active relationship and the second through an inactive one, which a measure uses with `USERELATIONSHIP`. A lookup to the main table itself, such as _Parent Account_, gets a table of its own, named after the column. Lookups with more than three target tables, such as _Regarding_, get none. Switch lookup tables off on the Model tab if you only want the choice tables.
 
+A lookup table of one table can have more columns than key and name: open it on the Model tab and choose **Columns…**. The same column list as the main query opens for that table: tick a column to add it, choose how it comes out (a lookup's name, ID or both, a choice's label or value, a date's time zone) and rename it. Key and name are always there, under the lookup table's own names. Every added column is read for every row of the table, so add what reports need. Combined lookup tables (Owner, Customer) keep key, name and type. The choice is remembered per query, and the Power BI project and template include the added columns.
+
 ## Working with other tools
 
 The tool declares the `fetchxml` capability in `pptb.config.json`, so FetchXML Studio's _Send to_ menu, and any other tool, can open it with a query:
@@ -131,7 +133,7 @@ Nothing in Dataverse. It reads table metadata and views, and fetches sample rows
 - Dataverse may not return a paging cookie for some queries, such as those ordered by a linked table's column. The query then falls back to simple paging, which is limited to 50,000 rows.
 - The OData style is only offered for a single table without joins or aggregates.
 - The Power BI project's and template's report is an empty page, and the model has no measures; both are yours to add.
-- Microsoft documents the project format, but not the inside of a template. The template follows what Power BI Desktop itself writes (the February 2025 release, which later releases open too). If a release of Power BI Desktop won't open one, please [open an issue](https://github.com/jybk/pptb-dataverse-m-builder/issues) with its message. The Excel workbook has the main query only: for the related tables, use the project.
+- Microsoft documents the project format, but not the inside of a template. The template follows what Power BI Desktop itself writes (the February 2025 release, which later releases open too), and has been tested with Power BI Desktop 2.150.1926.0 (January 2026): it opens, asks for the URL and loads every table. If a release of Power BI Desktop won't open one, please [open an issue](https://github.com/jybk/pptb-dataverse-m-builder/issues) with its message. The Excel workbook has the main query only: for the related tables, use the project.
 - The generated queries use `Web.Contents`, so steps you add after them in Power Query don't fold back to Dataverse. The filters inside the FetchXML or `$filter` still run on the server. You can replace the source with `OData.Feed` to get folding, but keep these trade-offs in mind:
   - **Labels**: by default, lookups come back as GUIDs and choices as numbers. Expand a lookup's navigation column to get its name (this folds to `$expand`). For choice labels, join the generated choice tables in your model, or add the option `IncludeAnnotations = "OData.Community.Display.V1.FormattedValue"`; the label then sits in each value's metadata, and you need a custom column per field with `Value.Metadata` to bring it out.
   - **Speed**: `OData.Feed` first reads the environment's whole `$metadata` document, which is large in Dataverse, so the first load and every refresh can be slow.

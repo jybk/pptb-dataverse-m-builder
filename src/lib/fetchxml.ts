@@ -95,6 +95,11 @@ export interface ModelInput {
      * but they are taken out of the FetchXML where that is safe, and warnings about them are dropped.
      */
     excluded?: ReadonlySet<string>;
+    /**
+     * Ids ("<link alias or empty>|<column>") of columns the FetchXML doesn't have, added from the grid.
+     * They're put into the main table or the linked table with that alias; the FetchXML text is left as is.
+     */
+    added?: ReadonlySet<string>;
 }
 
 interface AttrNode {
@@ -107,6 +112,7 @@ interface AttrNode {
     dategrouping: string | null;
     /** The <attribute> element this column comes from. */
     el: Element;
+    added?: boolean;
 }
 
 const columnId = (n: { linkAlias: string | null; alias: string | null; name: string }) => `${n.linkAlias ?? ""}|${n.alias ?? n.name}`;
@@ -313,11 +319,16 @@ export function buildQueryModel(input: ModelInput): QueryModel {
                     label = labelForLink(child, entity, name, attributesOf, input.tables);
                 }
                 if (!returns && hasColumns) warnings.push(`Columns inside the "${linkType}" link to ${name} are ignored: that link type only filters rows.`);
+                if (returns && hasColumns && alias) sources.push({ el: child, entity: name, alias, label: label ?? alias });
                 visit(child, name, alias, label, returns);
             }
         }
     };
+    const sources: Array<{ el: Element; entity: string; alias: string | null; label: string }> = [
+        { el: entityEl, entity: rootName, alias: null, label: input.tables.get(rootName)?.displayName ?? rootName },
+    ];
     visit(entityEl, rootName, null, null, true);
+    if (!isAggregate) addColumns(input.added, sources, nodes, attributesOf, doc);
     hoistAttributes(entityEl);
     const excluded = input.excluded ?? new Set<string>();
     // Before the record URL step, which puts the primary key back if it needs it
@@ -379,9 +390,11 @@ export function buildQueryModel(input: ModelInput): QueryModel {
             dategrouping: n.dategrouping,
             attribute,
             key,
+            ...(n.added ? { added: true } : {}),
         });
     }
     if (columns.every((c) => excluded.has(c.id))) warnings.push("The query doesn't return any columns yet.");
+    const columnSources = isAggregate ? [] : sources.map(({ entity, alias, label }) => ({ entity, alias, label }));
 
     const fetchLines = serializeLines(fetch);
     let odata: QueryModel["odata"] = null;
@@ -400,8 +413,37 @@ export function buildQueryModel(input: ModelInput): QueryModel {
         hasLinks,
         recordUrlKey,
         odata,
+        sources: columnSources,
         warnings,
     };
+}
+
+/**
+ * Puts the columns added from the grid into the query: an <attribute> in the main table or in the
+ * linked table with that alias. Ids for tables the query doesn't return columns from, columns the table
+ * doesn't have and columns already there are skipped.
+ */
+function addColumns(
+    added: ReadonlySet<string> | undefined,
+    sources: Array<{ el: Element; entity: string; alias: string | null; label: string }>,
+    nodes: AttrNode[],
+    attributesOf: (entity: string) => AttributeInfo[],
+    doc: Document,
+) {
+    if (!added || added.size === 0) return;
+    const present = new Set(nodes.map(columnId));
+    for (const id of [...added].sort()) {
+        const bar = id.indexOf("|");
+        const alias = id.slice(0, bar) || null;
+        const name = id.slice(bar + 1);
+        const source = sources.find((s) => s.alias === alias);
+        if (!source || present.has(id) || !attributesOf(source.entity).some((a) => a.logicalName === name)) continue;
+        const el = doc.createElement("attribute");
+        el.setAttribute("name", name);
+        source.el.appendChild(el);
+        nodes.push({ entity: source.entity, linkAlias: alias, linkLabel: alias ? source.label : null, name, alias: null, aggregate: null, dategrouping: null, el, added: true });
+        present.add(id);
+    }
 }
 
 /** FetchXML limited to a handful of rows, for the in-tool preview. */

@@ -1,8 +1,9 @@
-import { buildQueryModel, type ModelInput } from "./fetchxml";
-import { bridgeColumns, bridgeQueryName, generateBridgeQuery, generateLookupQuery, lookupColumns, type ChoiceQuery, type QueryColumn } from "./mcode";
+import { resolveOutputColumns } from "./columns";
+import { buildQueryModel, buildTableFetchXml, parseFetchXml, type ModelInput } from "./fetchxml";
+import { bridgeColumns, bridgeQueryName, generateBridgeQuery, generateLookupQuery, generateODataQuery, lookupColumns, type ChoiceQuery, type QueryColumn } from "./mcode";
 import { recordUrlColumnName } from "./columns";
 import { isChoiceLike } from "./metadata";
-import type { BuilderSettings, ColumnSpec, OutputColumn, QueryModel, TableInfo } from "./types";
+import type { BuilderSettings, ColumnOverrides, ColumnSpec, LookupColumns, OutputColumn, QueryModel, TableInfo } from "./types";
 
 /** One query of the model besides the main one. */
 export interface ModelQuery {
@@ -14,6 +15,10 @@ export interface ModelQuery {
     code: string;
     /** What it returns, for exports that declare the table's columns. */
     columns: QueryColumn[];
+    /** For a lookup table of one table: that table, whose other columns can be added. */
+    target?: TableInfo;
+    /** Lookup tables: how many columns were added besides key and name. */
+    addedColumns?: number;
 }
 
 export interface Relationship {
@@ -104,6 +109,11 @@ const NUMBER_KINDS = new Set(["integer", "bigint", "decimal", "double", "money"]
 
 /** The main query's columns as it returns them, the Record URL last. */
 function mainQueryColumns({ model, outputs, settings }: DataModelInput): QueryColumn[] {
+    return queryColumns(model, outputs, settings);
+}
+
+/** A query's columns as it returns them, for exports: the output columns, then the Record URL if it has one. */
+function queryColumns(model: QueryModel, outputs: OutputColumn[], settings: BuilderSettings): QueryColumn[] {
     const specs = new Map(model.columns.map((c) => [c.id, c]));
     const columns: QueryColumn[] = outputs.map((o) => {
         const spec = specs.get(o.colId);
@@ -125,10 +135,12 @@ export interface DataModelInput {
     modelInput: ModelInput;
     settings: BuilderSettings;
     connectionUrl: string;
-    /** Whether a column that isn't in the query can be ticked (table mode); in FetchXML mode only unticked ones can. */
+    /** Whether a column that isn't in the query can be added: in table mode and to FetchXML queries, not to aggregate ones. */
     canAddColumns: boolean;
     /** The primary key column's display name, for messages when it isn't in the query. */
     primaryKeyLabel?: string;
+    /** Columns added to lookup tables besides key and name, by target table. */
+    lookupColumns?: Record<string, LookupColumns>;
 }
 
 /** Lookups with more targets than this (Regarding, for example) get no lookup table. */
@@ -325,6 +337,9 @@ function addLookupTables(
             queryName = unique(taken, self ? [...byColumn, `${base} lookup`] : [base, ...byColumn, `${base} lookup`]);
         }
         const cols = lookupColumns(queryName);
+        const choice = targets.length === 1 ? input.lookupColumns?.[targets[0].logicalName] : undefined;
+        const built = choice ? lookupTableQuery(targets[0], queryName, choice, labels, input) : null;
+        const extended = built && built.added > 0 ? built : null;
         queries.push({
             id: `lookup:${key}`,
             kind: "lookup",
@@ -338,10 +353,12 @@ function addLookupTables(
                 input.connectionUrl,
             ),
             columns: [
-                { name: cols.key, mType: "type text" },
+                { name: cols.key, mType: "type text", hidden: true },
                 { name: cols.name, mType: "type text" },
                 ...(targets.length > 1 ? [{ name: cols.type, mType: "type text" }] : []),
             ],
+            ...(targets.length === 1 ? { target: targets[0] } : {}),
+            ...(extended ? { code: extended.code, columns: extended.columns, addedColumns: extended.added } : {}),
         });
         for (const u of uses) relate({ table: mainName, column: u.idColumn }, { table: queryName, column: cols.key });
     }
@@ -367,4 +384,56 @@ function bridgeModel(input: DataModelInput, spec: ColumnSpec): QueryModel | null
     const excluded = new Set(input.model.columns.filter((c) => c.id !== spec.id).map((c) => c.id));
     const m = buildQueryModel({ ...input.modelInput, includeRecordUrl: true, excluded, fromTablePicker: false, odataFilter: null });
     return m.recordUrlKey ? m : null;
+}
+
+export interface LookupTableQuery {
+    model: QueryModel;
+    outputs: OutputColumn[];
+    /** The overrides the outputs were resolved with: the choice's, plus the fixed names of key and name. */
+    overrides: ColumnOverrides;
+    code: string;
+    columns: QueryColumn[];
+    /** Columns added besides key and name. */
+    added: number;
+}
+
+/**
+ * A lookup table of one table with more columns than key and name: the target table read through OData
+ * like a table-picker query without a filter, so every row comes, with key and name under the lookup
+ * table's own names and the added columns shaped like the main query's (labels, names, dates).
+ * Null when the target table's columns aren't loaded yet.
+ */
+export function lookupTableQuery(
+    target: TableInfo,
+    queryName: string,
+    choice: LookupColumns,
+    usedBy: string[],
+    input: Pick<DataModelInput, "modelInput" | "settings" | "connectionUrl">,
+): LookupTableQuery | null {
+    const attributes = input.modelInput.attributes.get(target.logicalName);
+    if (!attributes) return null;
+    const key = target.primaryIdAttribute;
+    const name = target.primaryNameAttribute;
+    const fixed = new Set([key, ...(name ? [name] : [])]);
+    const extra = choice.columns.filter((c) => !fixed.has(c) && attributes.some((a) => a.logicalName === c));
+    const model = buildQueryModel({
+        doc: parseFetchXml(buildTableFetchXml(target, [...fixed, ...extra], false)),
+        tables: input.modelInput.tables,
+        attributes: input.modelInput.attributes,
+        pageSize: input.modelInput.pageSize,
+        includeRecordUrl: false,
+        fromTablePicker: true,
+        odataFilter: null,
+    });
+    const cols = lookupColumns(queryName);
+    const overrides: ColumnOverrides = { ...choice.overrides, [`|${key}`]: { name: cols.key }, ...(name ? { [`|${name}`]: { name: cols.name } } : {}) };
+    const outputs = resolveOutputColumns(model.columns, input.settings, overrides, false);
+    const code = [
+        `// Suggested query name: ${queryName}`,
+        generateODataQuery(model, outputs, input.settings, input.connectionUrl, {
+            headerLines: [`Lookup table: ${target.displayName} (${target.logicalName}) for ${usedBy.join(", ")}. Every row is read, active or not, so each record finds its match.`],
+        }),
+    ].join("\n");
+    const columns = queryColumns(model, outputs, input.settings).map((c) => (c.name === cols.key ? { ...c, hidden: true } : c));
+    return { model, outputs, overrides, code, columns, added: extra.length };
 }

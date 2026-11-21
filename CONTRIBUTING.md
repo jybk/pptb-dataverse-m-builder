@@ -34,7 +34,7 @@ src/lib/timezone.ts    daylight saving rules (shared by the M generator and the 
 src/lib/session.ts     what is remembered per environment
 src/lib/search.ts      matching for search boxes
 src/lib/saver.ts       delayed saving that flushes on close
-src/components/        React + Fluent UI components
+src/components/        React + Fluent UI components (LookupColumnsDialog: a lookup table's column picker, reusing ColumnGrid)
 tests/                 Vitest tests
 ```
 

@@ -124,4 +124,19 @@ describe("Power BI template", () => {
         const db = JSON.parse(utf16(await zip.file("DataModelSchema")!.async("uint8array")));
         expect(db.model.tables[0].columns.map((c: { name: string }) => c.name)).toContain('"Quoted" name');
     });
+
+    it("holds a lookup table's added columns", async () => {
+        const lookupColumns = { contact: { columns: ["emailaddress1"], overrides: {} } };
+        const { input: i, expected } = input({ lookupColumns });
+        const bytes = await buildPowerBiTemplate(i);
+        writeOut("Template extended", bytes, expected);
+        const zip = await JSZip.loadAsync(bytes);
+        const db = JSON.parse(utf16(await zip.file("DataModelSchema")!.async("uint8array")));
+        const contact = db.model.tables.find((t: { name: string }) => t.name === "Contact");
+        expect(contact.columns.map((c: { name: string; isHidden?: boolean }) => [c.name, !!c.isHidden])).toEqual([
+            ["Contact key", true],
+            ["Contact name", false],
+            ["Email", false],
+        ]);
+    });
 });

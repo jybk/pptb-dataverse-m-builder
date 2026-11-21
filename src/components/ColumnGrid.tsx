@@ -1,4 +1,4 @@
-import { Button, Caption1, Checkbox, Input, makeStyles, mergeClasses, Select, Spinner, Subtitle2, Switch, tokens, Tooltip } from "@fluentui/react-components";
+import { Caption1, Checkbox, Input, makeStyles, mergeClasses, Select, Spinner, Subtitle2, Switch, tokens, Tooltip } from "@fluentui/react-components";
 import { Search16Regular } from "@fluentui/react-icons";
 import { memo, useMemo, useState, type ReactNode } from "react";
 import { defaultBaseName, defaultModeFor, modeOptionsFor } from "../lib/columns";
@@ -52,6 +52,8 @@ export interface GridRow {
     spec: ColumnSpec | null;
     /** Extra context shown under the column, e.g. "via contact1" or an alias. */
     note?: string;
+    /** Always included, under a name that can't be changed (a lookup table's key and name). */
+    locked?: boolean;
 }
 
 interface Props {
@@ -82,7 +84,19 @@ export function ColumnGrid(props: Props) {
     }, [props.rows, search, onlyIncluded]);
 
     const includedCount = props.rows.filter((r) => r.included).length;
-    const allVisibleIncluded = visible.length > 0 && visible.every((r) => r.included);
+    // Select all works on the columns the list shows: a search or "only" filter narrows it
+    const toggleable = visible.filter((r) => !r.locked);
+    const allVisibleIncluded = toggleable.length > 0 && toggleable.every((r) => r.included);
+    const someVisibleIncluded = toggleable.some((r) => r.included);
+    const filtered = !!search.trim() || onlyIncluded;
+    const n = toggleable.length;
+    const selectAllLabel = allVisibleIncluded
+        ? filtered
+            ? `Clear the ${n} shown column${n === 1 ? "" : "s"}`
+            : "Clear all columns"
+        : filtered
+          ? `Select the ${n} shown column${n === 1 ? "" : "s"}`
+          : `Select all ${n} columns`;
 
     return (
         <div className={styles.root}>
@@ -107,20 +121,6 @@ export function ColumnGrid(props: Props) {
                     <Caption1>
                         {includedCount} of {props.rows.length} {props.includeLabel.toLowerCase()}
                     </Caption1>
-                    <span style={{ flex: 1 }} />
-                    <Button
-                        size="small"
-                        appearance="subtle"
-                        disabled={visible.length === 0}
-                        onClick={() =>
-                            props.onToggle(
-                                visible.map((r) => r.id),
-                                !allVisibleIncluded,
-                            )
-                        }
-                    >
-                        {allVisibleIncluded ? "Clear shown" : "Select shown"}
-                    </Button>
                 </div>
             </div>
             <div className={styles.scroll}>
@@ -132,7 +132,21 @@ export function ColumnGrid(props: Props) {
                     <table className={styles.table}>
                         <thead>
                             <tr>
-                                <th className={styles.th} style={{ width: 32 }} aria-label={props.includeLabel} />
+                                <th className={styles.th} style={{ width: 32 }}>
+                                    <Tooltip content={selectAllLabel} relationship="description">
+                                        <Checkbox
+                                            aria-label={selectAllLabel}
+                                            checked={allVisibleIncluded ? true : someVisibleIncluded ? "mixed" : false}
+                                            disabled={n === 0}
+                                            onChange={() =>
+                                                props.onToggle(
+                                                    toggleable.map((r) => r.id),
+                                                    !allVisibleIncluded,
+                                                )
+                                            }
+                                        />
+                                    </Tooltip>
+                                </th>
                                 <th className={styles.th}>Column</th>
                                 <th className={styles.th} style={{ width: "55%" }}>
                                     Output &amp; name
@@ -179,7 +193,12 @@ const GridRowView = memo(function GridRowView(props: {
     return (
         <tr className={mergeClasses(row.included && styles.rowIncluded)}>
             <td className={styles.td}>
-                <Checkbox checked={row.included} onChange={(_, d) => props.onToggle([row.id], !!d.checked)} aria-label={`Include ${a.displayName}`} />
+                <Checkbox
+                    checked={row.included}
+                    disabled={row.locked}
+                    onChange={(_, d) => props.onToggle([row.id], !!d.checked)}
+                    aria-label={`Include ${a.displayName}`}
+                />
             </td>
             <td className={styles.td}>
                 <div className={styles.colName}>
@@ -223,6 +242,7 @@ const GridRowView = memo(function GridRowView(props: {
                                 size="small"
                                 className={styles.nameInput}
                                 value={override?.name ?? ""}
+                                disabled={row.locked}
                                 placeholder={placeholder}
                                 onChange={(_, d) => props.onOverride(row.id, { name: d.value })}
                                 aria-label={`Name for ${a.displayName}`}

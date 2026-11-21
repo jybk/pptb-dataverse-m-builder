@@ -19,7 +19,7 @@ import {
     Subtitle2,
     tokens,
 } from "@fluentui/react-components";
-import { ArrowRight12Regular, Copy16Regular, DataBarVertical16Regular, DocumentTable16Regular, Save16Regular } from "@fluentui/react-icons";
+import { ArrowRight12Regular, Copy16Regular, DataBarVertical16Regular, DocumentTable16Regular, Save16Regular, TableEdit16Regular } from "@fluentui/react-icons";
 import type { DataModel, ModelNote, ModelQuery } from "../lib/model";
 import type { BuilderSettings } from "../lib/types";
 import { CodeView } from "./CodeView";
@@ -98,6 +98,7 @@ export function ModelTab(props: {
     onSaveWorkbook: () => void;
     onSaveProject: () => void;
     onSaveTemplate: () => void;
+    onEditLookup: (queryId: string) => void;
 }) {
     const styles = useStyles();
     const { data } = props;
@@ -216,11 +217,19 @@ export function ModelTab(props: {
                                         <Badge className={styles.fixed} size="small" appearance="tint" color={KIND_BADGE[q.kind].color}>
                                             {KIND_BADGE[q.kind].label}
                                         </Badge>
-                                        <Caption1 className={styles.source}>{q.source}</Caption1>
+                                        <Caption1 className={styles.source}>
+                                            {q.source}
+                                            {q.addedColumns ? ` · ${q.addedColumns} more column${q.addedColumns === 1 ? "" : "s"}` : ""}
+                                        </Caption1>
                                     </span>
                                 </AccordionHeader>
                                 <AccordionPanel>
                                     <div className={styles.actions} style={{ marginBottom: 6 }}>
+                                        {q.target && (
+                                            <Button size="small" appearance="primary" icon={<TableEdit16Regular />} onClick={() => props.onEditLookup(q.id)}>
+                                                Columns…
+                                            </Button>
+                                        )}
                                         <Button size="small" icon={<Copy16Regular />} onClick={() => props.onCopy(q.code, q.queryName)}>
                                             Copy
                                         </Button>
@@ -228,6 +237,13 @@ export function ModelTab(props: {
                                             Save .pq
                                         </Button>
                                     </div>
+                                    {q.kind === "lookup" && (
+                                        <Caption1 block style={{ marginBottom: 6 }}>
+                                            {q.target
+                                                ? `Key and name${q.addedColumns ? `, plus ${q.addedColumns} column${q.addedColumns === 1 ? "" : "s"} you added` : ""}. Columns… adds more of ${q.target.displayName}'s columns.`
+                                                : "Key, name and type: a lookup table combined from several tables can't take more columns."}
+                                        </Caption1>
+                                    )}
                                     <div className={styles.codeBox}>
                                         <CodeView code={q.code} />
                                     </div>
